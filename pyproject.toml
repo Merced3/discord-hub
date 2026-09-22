@@ -1,6 +1,6 @@
 [project]
 name = "discord-hub"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Single always-on Discord connection and local API for all projects"
 requires-python = ">=3.13"
 dependencies = [

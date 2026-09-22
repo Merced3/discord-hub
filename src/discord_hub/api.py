@@ -26,7 +26,7 @@ class RegisterRequest(BaseModel):
 
 
 def create_api(bot: HubBot, started_at: float) -> FastAPI:
-    app = FastAPI(title="discord-hub", version="0.1.0.dev0")
+    app = FastAPI(title="discord-hub", version="0.1.0")
 
     @app.get("/health")
     async def health() -> dict:
