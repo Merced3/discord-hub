@@ -4,21 +4,35 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from typing import Any
 
 import aiohttp
 import discord
 
+from .commands import CommandSpec, CommandStore, build_command
 from .config import Settings
 from .registry import ChannelTakenError, Registration, Registry
 
 logger = logging.getLogger(__name__)
+
+_MESSAGE_LIMIT = 1_900  # Discord's is 2_000; leave margin
+_INTERACTION_TTL_S = 14 * 60  # interaction tokens live 15 minutes
+_CALLBACK_BUDGET_S = 2.5  # Discord allows 3s for the initial response
+
+
+def _chunks(text: str, limit: int = _MESSAGE_LIMIT) -> list[str]:
+    content = text.strip() or "(No text response.)"
+    return [content[i : i + limit] for i in range(0, len(content), limit)]
 
 
 class HubBot(discord.Client):
     """A minimal Discord client. Features are added here as methods the
     API layer can call, keeping all Discord knowledge in this class."""
 
-    def __init__(self, settings: Settings, registry: Registry) -> None:
+    def __init__(
+        self, settings: Settings, registry: Registry, command_store: CommandStore
+    ) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
         intents.messages = True
@@ -26,11 +40,19 @@ class HubBot(discord.Client):
         super().__init__(intents=intents)
         self.settings = settings
         self.registry = registry
+        self.command_store = command_store
+        self.tree = discord.app_commands.CommandTree(self)
         self.ready_event: asyncio.Event  # assigned in main before startup
         self._http: aiohttp.ClientSession  # created in setup_hook
+        self._interactions: dict[str, tuple[discord.Interaction, float]] = {}
 
     async def setup_hook(self) -> None:
         self._http = aiohttp.ClientSession()
+        self.tree.on_error = self._on_command_error
+        self._rebuild_commands()
+        guild = discord.Object(id=self.settings.discord_guild_id)
+        synced = await self.tree.sync(guild=guild)
+        logger.info("Synchronized %d command(s) to the guild.", len(synced))
 
     async def close(self) -> None:
         await self._http.close()
@@ -59,7 +81,7 @@ class HubBot(discord.Client):
                 }
         if reg is None:
             return
-        payload = {
+        payload: dict[str, Any] = {
             "message_id": str(message.id),
             "channel_id": str(message.channel.id),
             "author": {"id": str(message.author.id), "name": message.author.display_name},
@@ -79,32 +101,47 @@ class HubBot(discord.Client):
 
     # -- outbound: project -> Discord ------------------------------------
 
-    async def send_message(self, channel_id: int, text: str) -> dict:
-        """Send a text message to a channel or thread. If it (or its parent
-        channel) is registered, send through the project's webhook so the
-        message carries its name and avatar."""
+    async def send_message(
+        self, channel_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> dict:
+        """Send a text message to a channel or thread, chunked to Discord's
+        limit. If it (or its parent channel) is registered, send through the
+        project's webhook so the message carries its name and avatar.
+        A reply reference forces the plain bot path (webhooks can't reply).
+        """
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            raise LookupError(f"Channel {channel_id} is not a text channel or thread")
+
         thread = channel if isinstance(channel, discord.Thread) else None
         reg = self.registry.get(channel_id)
         if reg is None and thread is not None:
             reg = self.registry.get(thread.parent_id)
 
-        if reg is not None and reg.webhook_url:
+        if reply_to_message_id is None and reg is not None and reg.webhook_url:
             webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
-            kwargs: dict = {"wait": True}
+            kwargs: dict[str, Any] = {"wait": True}
             if reg.display_name:
                 kwargs["username"] = reg.display_name
             if reg.avatar_url:
                 kwargs["avatar_url"] = reg.avatar_url
             if thread is not None:
                 kwargs["thread"] = thread
-            message = await webhook.send(text, **kwargs)
-            return {"id": str(message.id), "channel_id": str(channel_id), "via": "webhook"}
+            first_id = None
+            for chunk in _chunks(text):
+                message = await webhook.send(chunk, **kwargs)
+                first_id = first_id or message.id
+            return {"id": str(first_id), "channel_id": str(channel_id), "via": "webhook"}
 
-        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-            raise LookupError(f"Channel {channel_id} is not a text channel or thread")
-        message = await channel.send(text)
-        return {"id": str(message.id), "channel_id": str(channel.id), "via": "bot"}
+        parts = _chunks(text)
+        if reply_to_message_id is not None:
+            reference = await channel.fetch_message(reply_to_message_id)
+            first = await reference.reply(parts[0], mention_author=False)
+        else:
+            first = await channel.send(parts[0])
+        for chunk in parts[1:]:
+            await channel.send(chunk)
+        return {"id": str(first.id), "channel_id": str(channel.id), "via": "bot"}
 
     async def create_thread(self, channel_id: int, name: str) -> dict:
         """Create a public thread in a text channel (e.g. one per session)."""
@@ -117,6 +154,108 @@ class HubBot(discord.Client):
             "name": thread.name,
             "parent_channel_id": str(channel.id),
         }
+
+    async def trigger_typing(self, channel_id: int) -> None:
+        """Show 'bot is typing...' in a channel for ~10 seconds."""
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        await self.http.send_typing(channel.id)
+
+    def channel_permissions(self, channel_id: int) -> dict:
+        """The bot's granted permissions in a channel (preflight helper)."""
+        guild = self.get_guild(self.settings.discord_guild_id)
+        channel = self.get_channel(channel_id)
+        if guild is None or channel is None:
+            raise LookupError(f"Unknown channel {channel_id}")
+        perms = channel.permissions_for(guild.me)
+        granted = sorted(name for name, value in perms if value)
+        return {"channel_id": str(channel_id), "permissions": granted}
+
+    # -- project-owned slash commands (ADR 0003) --------------------------
+
+    def _rebuild_commands(self) -> None:
+        guild = discord.Object(id=self.settings.discord_guild_id)
+        self.tree.clear_commands(guild=guild)
+        for callback_url, specs in self.command_store.all().items():
+            for spec in specs:
+                self.tree.add_command(
+                    build_command(spec, self._invoke_command), guild=guild
+                )
+
+    async def set_commands(self, callback_url: str, specs: list[CommandSpec]) -> int:
+        self.command_store.set_project_commands(callback_url, specs)
+        self._rebuild_commands()
+        guild = discord.Object(id=self.settings.discord_guild_id)
+        synced = await self.tree.sync(guild=guild)
+        return len(synced)
+
+    async def _invoke_command(
+        self, spec: CommandSpec, interaction: discord.Interaction, options: dict[str, Any]
+    ) -> None:
+        """Deliver a command invocation to its owning project. The project's
+        HTTP response IS the interaction response (ADR 0003)."""
+        interaction_id = str(interaction.id)
+        self._interactions[interaction_id] = (interaction, time.monotonic())
+        callback_url = self.command_store.owner_of(spec.name)
+        if callback_url is None:
+            await interaction.response.send_message(
+                "This command is not currently routed.", ephemeral=True
+            )
+            return
+        event = {
+            "type": "command",
+            "interaction_id": interaction_id,
+            "command": spec.name,
+            "options": options,
+            "channel_id": str(interaction.channel_id),
+            "user": {"id": str(interaction.user.id), "name": interaction.user.display_name},
+        }
+        try:
+            async with self._http.post(
+                callback_url,
+                json=event,
+                timeout=aiohttp.ClientTimeout(total=_CALLBACK_BUDGET_S),
+            ) as resp:
+                body = await resp.json(content_type=None)
+        except (TimeoutError, aiohttp.ClientError):
+            logger.exception("command callback to %s failed; auto-deferring", callback_url)
+            body = {"defer": True}
+
+        try:
+            if body.get("defer"):
+                await interaction.response.defer(
+                    ephemeral=bool(body.get("ephemeral", False)), thinking=True
+                )
+            else:
+                await interaction.response.send_message(
+                    body.get("text", "(no response)"),
+                    ephemeral=bool(body.get("ephemeral", False)),
+                )
+        except discord.HTTPException:
+            logger.exception("could not answer interaction %s", interaction_id)
+
+    async def interaction_followup(
+        self, interaction_id: str, text: str, ephemeral: bool = False
+    ) -> dict:
+        entry = self._interactions.get(interaction_id)
+        if entry is None or time.monotonic() - entry[1] > _INTERACTION_TTL_S:
+            self._interactions.pop(interaction_id, None)
+            raise LookupError(f"Unknown or expired interaction {interaction_id}")
+        interaction, _ = entry
+        message = await interaction.followup.send(text, ephemeral=ephemeral)
+        return {"id": str(message.id)}
+
+    async def _on_command_error(
+        self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError
+    ) -> None:
+        logger.exception("Application command failed.", exc_info=error)
+        message = "The command failed. See the hub log for details."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            pass
 
     # -- registrations ----------------------------------------------------
 

@@ -14,6 +14,7 @@ from automation_harness import Harness, HarnessConfig, ServiceContext
 
 from .api import create_api
 from .bot import HubBot
+from .commands import CommandStore
 from .config import Settings
 from .registry import Registry
 
@@ -25,7 +26,8 @@ async def hub_service(ctx: ServiceContext) -> None:
     requests shutdown via ctx.stop_event."""
     settings = Settings()  # type: ignore[call-arg]  # values come from env
     registry = Registry(settings.data_dir / "registrations.json")
-    bot = HubBot(settings, registry)
+    command_store = CommandStore(settings.data_dir / "commands.json")
+    bot = HubBot(settings, registry, command_store)
     bot.ready_event = asyncio.Event()
 
     api = create_api(bot, started_at=time.time())

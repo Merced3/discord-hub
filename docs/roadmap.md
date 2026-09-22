@@ -19,6 +19,11 @@
   channel's registration (inbound payloads carry a `thread` field;
   outbound sends into threads keep the project's webhook identity).
   Built for socratic-partner's session-per-thread design. Verified live.
+- [x] **Project-owned slash commands** (ADR 0003) — `PUT /commands`,
+  invocation routing with the callback's response as the interaction
+  response, defer + followups, typed/ranged options. Verified live.
+- [x] **Messaging extras** — reply-to-message, auto-chunking, typing
+  indicators, channel permission preflight. Verified live.
 
 ## Next up (in rough order)
 
@@ -34,6 +39,4 @@
 
 - Multi-guild support (the hub serves one server; revisit only if a real
   second server appears)
-- Slash commands owned by the hub (projects may add their own later via
-  the hub if needed)
 - Message history/archiving

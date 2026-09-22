@@ -53,6 +53,10 @@ Send a text message.
 Errors: `404` channel unknown or not a text channel, `403` bot lacks
 permission in that channel.
 
+Optional `"reply_to_message_id": "456"` makes the message a reply to an
+existing message (forces the plain bot path — webhooks can't reply).
+Long texts are automatically chunked to fit Discord's limit.
+
 If the channel is registered (below), the message is sent through the
 project's webhook and carries its display name and avatar; the response
 gains a `"via": "webhook"` field.
@@ -122,6 +126,79 @@ List all current registrations.
 ### `DELETE /registrations/{channel_id}`
 Release a channel and delete its webhook. `204` on success, `404` if the
 channel was not registered.
+
+### `PUT /commands`
+Declare a project's slash commands (ADR 0003). Replaces the project's
+whole set; the hub registers them with Discord and routes invocations to
+`callback_url`. Command names are unique across projects.
+
+**Request**
+```json
+{
+  "callback_url": "http://localhost:9000/discord",
+  "commands": [
+    {
+      "name": "interval",
+      "description": "Set hours between conversations.",
+      "options": [
+        {
+          "name": "hours",
+          "description": "Whole hours from 1 to 720.",
+          "type": "integer",
+          "required": true,
+          "min_value": 1,
+          "max_value": 720
+        }
+      ]
+    }
+  ]
+}
+```
+Option `type`: `integer` | `string` | `boolean` | `number`.
+
+**Response `200`** — `{ "synced": 1 }`. Errors: `409` name owned by
+another project, `403` bot invite lacks the `applications.commands` scope.
+
+**Invocation delivery** — when a user runs a command, the hub POSTs to the
+callback:
+```json
+{
+  "type": "command",
+  "interaction_id": "999",
+  "command": "interval",
+  "options": { "hours": 6 },
+  "channel_id": "123",
+  "user": { "id": "789", "name": "cedgo" }
+}
+```
+
+**The callback's HTTP response IS the interaction response** (Discord
+allows ~3 seconds):
+- `{ "text": "Interval set.", "ephemeral": true }` → shown as the response
+- `{ "defer": true, "ephemeral": true }` → "thinking..."; follow up later
+
+On callback error/timeout the hub auto-defers so the interaction survives.
+
+### `POST /interactions/{interaction_id}/followups`
+Send a follow-up after deferring. Body: `{ "text": "...", "ephemeral": true }`.
+Interaction tokens live ~15 minutes; `404` if unknown or expired.
+
+### `POST /channels/{channel_id}/typing`
+Show "bot is typing..." for ~10 seconds. `202`.
+
+### `GET /channels/{channel_id}/permissions`
+The bot's granted permissions in a channel — preflight before promising
+delivery.
+
+## Rendering timestamps (no API needed)
+
+Discord renders timestamp markdown natively — projects never need a
+Discord library for this:
+
+- `<t:1700000000:F>` → full date/time
+- `<t:1700000000:R>` → relative ("in 3 hours")
+
+Use a Unix timestamp; styles: `t T d D f F R`.
 
 ## Planned (not yet implemented)
 
