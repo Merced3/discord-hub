@@ -11,6 +11,7 @@ import uvicorn
 from .api import create_api
 from .bot import HubBot
 from .config import Settings
+from .registry import Registry
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,8 @@ async def run() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     settings = Settings()  # type: ignore[call-arg]  # values come from env
-    bot = HubBot(settings)
+    registry = Registry(settings.data_dir / "registrations.json")
+    bot = HubBot(settings, registry)
     bot.ready_event = asyncio.Event()
 
     api = create_api(bot, started_at=time.time())

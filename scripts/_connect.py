@@ -14,12 +14,13 @@ from contextlib import asynccontextmanager
 
 from discord_hub.bot import HubBot
 from discord_hub.config import Settings
+from discord_hub.registry import Registry
 
 
 @asynccontextmanager
 async def connected_bot() -> AsyncIterator[HubBot]:
     settings = Settings()  # type: ignore[call-arg]  # values come from .env
-    bot = HubBot(settings)
+    bot = HubBot(settings, Registry(settings.data_dir / "registrations.json"))
     bot.ready_event = asyncio.Event()
     task = asyncio.create_task(bot.start(settings.discord_token))
     try:

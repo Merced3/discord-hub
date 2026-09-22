@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import aiohttp
 import discord
 
 from .config import Settings
+from .registry import ChannelTakenError, Registration, Registry
 
 logger = logging.getLogger(__name__)
 
@@ -16,26 +18,113 @@ class HubBot(discord.Client):
     """A minimal Discord client. Features are added here as methods the
     API layer can call, keeping all Discord knowledge in this class."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, registry: Registry) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
         intents.messages = True
         intents.message_content = True
         super().__init__(intents=intents)
         self.settings = settings
+        self.registry = registry
         self.ready_event: asyncio.Event  # assigned in main before startup
+        self._http: aiohttp.ClientSession  # created in setup_hook
+
+    async def setup_hook(self) -> None:
+        self._http = aiohttp.ClientSession()
+
+    async def close(self) -> None:
+        await self._http.close()
+        await super().close()
 
     async def on_ready(self) -> None:
         logger.info("Connected to Discord as %s", self.user)
         self.ready_event.set()
 
+    # -- inbound: Discord -> registered project --------------------------
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot:  # ignore bots and our own webhook sends
+            return
+        reg = self.registry.get(message.channel.id)
+        if reg is None:
+            return
+        payload = {
+            "message_id": str(message.id),
+            "channel_id": str(message.channel.id),
+            "author": {"id": str(message.author.id), "name": message.author.display_name},
+            "text": message.content,
+            "created_at": message.created_at.isoformat(),
+        }
+        try:
+            async with self._http.post(reg.callback_url, json=payload) as resp:
+                if resp.status >= 400:
+                    logger.warning(
+                        "delivery to %s failed: HTTP %s", reg.callback_url, resp.status
+                    )
+        except aiohttp.ClientError:
+            logger.exception("delivery to %s failed", reg.callback_url)
+
+    # -- outbound: project -> Discord ------------------------------------
+
     async def send_message(self, channel_id: int, text: str) -> dict:
-        """Send a text message to a channel the bot can see."""
+        """Send a text message. If the channel is registered, send through
+        the project's webhook so the message carries its name and avatar."""
+        reg = self.registry.get(channel_id)
+        if reg is not None and reg.webhook_url:
+            webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
+            message = await webhook.send(
+                text,
+                username=reg.display_name or None,
+                avatar_url=reg.avatar_url or None,
+                wait=True,
+            )
+            return {"id": str(message.id), "channel_id": str(channel_id), "via": "webhook"}
+
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             raise LookupError(f"Channel {channel_id} is not a text channel")
         message = await channel.send(text)
-        return {"id": str(message.id), "channel_id": str(channel.id)}
+        return {"id": str(message.id), "channel_id": str(channel.id), "via": "bot"}
+
+    # -- registrations ----------------------------------------------------
+
+    async def register(
+        self,
+        channel_id: int,
+        callback_url: str,
+        display_name: str | None = None,
+        avatar_url: str | None = None,
+    ) -> Registration:
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            raise LookupError(f"Channel {channel_id} is not a text channel")
+        webhook = await channel.create_webhook(name=f"hub: {display_name or 'project'}")
+        reg = Registration(
+            channel_id=channel_id,
+            callback_url=callback_url,
+            display_name=display_name,
+            avatar_url=avatar_url,
+            webhook_url=webhook.url,
+        )
+        try:
+            self.registry.add(reg)
+        except ChannelTakenError:
+            await webhook.delete(reason="registration failed: channel already taken")
+            raise
+        logger.info("registered channel %s -> %s", channel_id, callback_url)
+        return reg
+
+    async def deregister(self, channel_id: int) -> Registration | None:
+        reg = self.registry.remove(channel_id)
+        if reg is not None and reg.webhook_url:
+            webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
+            try:
+                await webhook.delete(reason="channel deregistered")
+            except discord.HTTPException:
+                logger.warning("could not delete webhook for channel %s", channel_id)
+        return reg
+
+    # -- caretaker views --------------------------------------------------
 
     def server_structure(self) -> dict:
         """A plain-dict snapshot of the guild's layout (no Discord types)."""

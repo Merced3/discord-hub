@@ -53,15 +53,51 @@ Send a text message.
 Errors: `404` channel unknown or not a text channel, `403` bot lacks
 permission in that channel.
 
-## Planned (not yet implemented)
+If the channel is registered (below), the message is sent through the
+project's webhook and carries its display name and avatar; the response
+gains a `"via": "webhook"` field.
 
 ### `POST /registrations`
-Claim a channel for a project. Body:
-`{ "channel_id": "123", "callback_url": "http://localhost:9000/discord" }`.
-Refuses with `409` if the channel is already claimed (no ambiguity).
+Claim a channel for a project. Creates a webhook in the channel for the
+project's identity (ADR 0002). Registration persists across hub restarts.
 
-Inbound messages are then delivered to the callback as
-`POST {callback_url}` with `{ "channel_id", "author", "text" }`.
+**Request**
+```json
+{
+  "channel_id": 123,
+  "callback_url": "http://localhost:9000/discord",
+  "display_name": "Socrates",
+  "avatar_url": "https://example.com/socrates.png"
+}
+```
+`display_name` and `avatar_url` are optional.
+
+**Response `201`** — the registration, including the created `webhook_url`.
+
+Errors: `409` channel already claimed by another project (the hub refuses
+ambiguity rather than picking a winner), `404` unknown channel, `403`
+bot lacks Manage Webhooks.
+
+**Inbound delivery** — when a (human) message arrives in a registered
+channel, the hub POSTs to the callback URL:
+```json
+{
+  "message_id": "456",
+  "channel_id": "123",
+  "author": { "id": "789", "name": "cedgo" },
+  "text": "hello",
+  "created_at": "2026-01-01T12:00:00+00:00"
+}
+```
+
+### `GET /registrations`
+List all current registrations.
+
+### `DELETE /registrations/{channel_id}`
+Release a channel and delete its webhook. `204` on success, `404` if the
+channel was not registered.
+
+## Planned (not yet implemented)
 
 ### `POST /voice/join`, `POST /voice/leave`, `POST /voice/play`
 Voice channel control — the foundation the teaching agent's audio

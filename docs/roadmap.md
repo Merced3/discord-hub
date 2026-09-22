@@ -8,21 +8,20 @@
 - [x] `POST /messages` — send a text message to a channel
 - [x] `scripts/check_permissions.py` + `scripts/show_structure.py` —
   verified live against the real server (message delivered end-to-end)
+- [x] `POST /registrations` + inbound delivery — channel ownership,
+  webhook identity (ADR 0002), incoming messages POSTed to the owning
+  project's callback; persists across restarts. Verified live.
 
 ## Next up (in rough order)
 
-1. **`POST /registrations` + inbound delivery** — the hub stops being
-   send-only and becomes a real router. Includes per-project identity:
-   the hub creates a channel webhook per registered project so each
-   project's messages carry its own name and avatar (ADR 0002).
-2. **Migrate socratic-partner** — replace its `discord_bot.py` internals
+1. **Migrate socratic-partner** — replace its `discord_bot.py` internals
    with hub API calls. Done in the socratic-partner repo/session.
-3. **Voice foundation** — join/leave/play. The teaching agent's
+2. **Voice foundation** — join/leave/play. The teaching agent's
    prerequisite.
-4. **Caretaker proposals** — given the structure snapshot, the hub (or an
+3. **Caretaker proposals** — given the structure snapshot, the hub (or an
    agent driving it) can suggest a better server layout. Always
    permission-gated; nothing is applied without a yes.
-5. **Automation-harness integration** — run the hub inside the harness:
+4. **Automation-harness integration** — run the hub inside the harness:
    single-instance lock, graceful shutdown, persistent schedules (e.g.
    periodic server-structure snapshots), structured logs, `status.json`.
 

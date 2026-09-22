@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -12,6 +13,7 @@ class Settings(BaseSettings):
     discord_guild_id: int
     hub_host: str = "127.0.0.1"
     hub_port: int = 8100
+    data_dir: Path = Path("data")
     # Not used yet; kept here so .env can hold them for future features.
     discord_application_id: int | None = None
     discord_public_key: str | None = None
