@@ -45,20 +45,22 @@ class HubBot(discord.Client):
 
         categories = []
         for category, channels in guild.by_category():
+            entries = []
+            for ch in channels:
+                if isinstance(ch, discord.TextChannel):
+                    entries.append(
+                        {"id": str(ch.id), "name": ch.name, "type": "text", "topic": ch.topic or ""}
+                    )
+                elif isinstance(ch, discord.ForumChannel):
+                    entries.append(
+                        {"id": str(ch.id), "name": ch.name, "type": "forum", "topic": ch.topic or ""}
+                    )
+                elif isinstance(ch, discord.VoiceChannel):
+                    entries.append({"id": str(ch.id), "name": ch.name, "type": "voice"})
             categories.append(
                 {
                     "name": category.name if category else "(no category)",
-                    "channels": [
-                        {
-                            "id": str(ch.id),
-                            "name": ch.name,
-                            "type": "voice"
-                            if isinstance(ch, discord.VoiceChannel)
-                            else "text",
-                        }
-                        for ch in channels
-                        if isinstance(ch, (discord.TextChannel, discord.VoiceChannel))
-                    ],
+                    "channels": entries,
                 }
             )
         return {

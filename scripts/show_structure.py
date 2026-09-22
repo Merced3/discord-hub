@@ -18,8 +18,10 @@ async def main() -> None:
         for category in structure["categories"]:
             print(category["name"])
             for ch in category["channels"]:
-                icon = "[voice]" if ch["type"] == "voice" else "#      "
+                icon = {"voice": "[voice]", "forum": "[forum]"}.get(ch["type"], "#      ")
                 print(f"  {icon} {ch['name']:<24} {ch['id']}")
+                if ch.get("topic"):
+                    print(f"          topic: {ch['topic']}")
         print("\nRoles: " + ", ".join(structure["roles"]))
 
 
