@@ -11,6 +11,10 @@
 - [x] `POST /registrations` + inbound delivery — channel ownership,
   webhook identity (ADR 0002), incoming messages POSTed to the owning
   project's callback; persists across restarts. Verified live.
+- [x] **Automation-harness integration** — the hub runs as a supervised
+  harness service: single-instance lock (verified: second instance
+  refuses), stale-lock recovery after a hard kill (verified), structured
+  logs, `data/status.json`.
 
 ## Next up (in rough order)
 
@@ -21,9 +25,6 @@
 3. **Caretaker proposals** — given the structure snapshot, the hub (or an
    agent driving it) can suggest a better server layout. Always
    permission-gated; nothing is applied without a yes.
-4. **Automation-harness integration** — run the hub inside the harness:
-   single-instance lock, graceful shutdown, persistent schedules (e.g.
-   periodic server-structure snapshots), structured logs, `status.json`.
 
 ## Explicitly out of scope (for now)
 

@@ -46,6 +46,21 @@ for that channel, via a webhook-style callback.
 See `docs/api.md` for the full contract and `docs/architecture.md` for how
 it works inside.
 
+## Running it
+
+The hub runs inside the automation-harness (sibling repo), which owns the
+lifecycle: single-instance lock, supervision with restart, graceful
+shutdown, structured logs, and `data/status.json`.
+
+```bash
+pip install -e ../automation-harness   # not on PyPI; install from sibling
+pip install -e .
+python -m discord_hub.main
+```
+
+Requires a `.env` (see `.env.example`). Runtime state lives in `data/`
+(ignored by git).
+
 ## Status
 
 Early scaffold. See `docs/roadmap.md` for where this is headed.
