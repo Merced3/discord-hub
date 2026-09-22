@@ -10,7 +10,9 @@
 ## Next up (in rough order)
 
 1. **`POST /registrations` + inbound delivery** — the hub stops being
-   send-only and becomes a real router.
+   send-only and becomes a real router. Includes per-project identity:
+   the hub creates a channel webhook per registered project so each
+   project's messages carry its own name and avatar (ADR 0002).
 2. **Migrate socratic-partner** — replace its `discord_bot.py` internals
    with hub API calls. Done in the socratic-partner repo/session.
 3. **Voice foundation** — join/leave/play. The teaching agent's
