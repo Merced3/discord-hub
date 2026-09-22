@@ -15,6 +15,10 @@
   harness service: single-instance lock (verified: second instance
   refuses), stale-lock recovery after a hard kill (verified), structured
   logs, `data/status.json`.
+- [x] **Thread support** — `POST /threads`, threads inherit the parent
+  channel's registration (inbound payloads carry a `thread` field;
+  outbound sends into threads keep the project's webhook identity).
+  Built for socratic-partner's session-per-thread design. Verified live.
 
 ## Next up (in rough order)
 
