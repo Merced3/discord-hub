@@ -37,10 +37,23 @@ voice), and roles. Powers the "caretaker" view of the server.
 }
 ```
 
-## Planned (not yet implemented)
-
 ### `POST /messages`
-Send a text message. Body: `{ "channel_id": "123", "text": "hello" }`.
+Send a text message.
+
+**Request**
+```json
+{ "channel_id": 123, "text": "hello" }
+```
+
+**Response `201`**
+```json
+{ "id": "456", "channel_id": "123" }
+```
+
+Errors: `404` channel unknown or not a text channel, `403` bot lacks
+permission in that channel.
+
+## Planned (not yet implemented)
 
 ### `POST /registrations`
 Claim a channel for a project. Body:

@@ -29,6 +29,14 @@ class HubBot(discord.Client):
         logger.info("Connected to Discord as %s", self.user)
         self.ready_event.set()
 
+    async def send_message(self, channel_id: int, text: str) -> dict:
+        """Send a text message to a channel the bot can see."""
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            raise LookupError(f"Channel {channel_id} is not a text channel")
+        message = await channel.send(text)
+        return {"id": str(message.id), "channel_id": str(channel.id)}
+
     def server_structure(self) -> dict:
         """A plain-dict snapshot of the guild's layout (no Discord types)."""
         guild = self.get_guild(self.settings.discord_guild_id)
