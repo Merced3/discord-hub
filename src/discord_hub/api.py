@@ -25,6 +25,11 @@ class RegisterRequest(BaseModel):
     avatar_url: str | None = None
 
 
+class CreateThreadRequest(BaseModel):
+    channel_id: int
+    name: str
+
+
 def create_api(bot: HubBot, started_at: float) -> FastAPI:
     app = FastAPI(title="discord-hub", version="0.1.0")
 
@@ -44,6 +49,17 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except discord.Forbidden as exc:
             raise HTTPException(status_code=403, detail="Bot lacks permission in that channel") from exc
+
+    @app.post("/threads", status_code=201)
+    async def create_thread(body: CreateThreadRequest) -> dict:
+        try:
+            return await bot.create_thread(body.channel_id, body.name)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except discord.Forbidden as exc:
+            raise HTTPException(
+                status_code=403, detail="Bot lacks Create Public Threads in that channel"
+            ) from exc
 
     @app.get("/registrations")
     async def list_registrations() -> list[dict]:

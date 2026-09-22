@@ -45,7 +45,18 @@ class HubBot(discord.Client):
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:  # ignore bots and our own webhook sends
             return
+        thread_info = None
         reg = self.registry.get(message.channel.id)
+        if reg is None and isinstance(message.channel, discord.Thread):
+            # A thread inherits its parent channel's registration; the
+            # payload tells the project which thread (session) this was.
+            reg = self.registry.get(message.channel.parent_id)
+            if reg is not None:
+                thread_info = {
+                    "id": str(message.channel.id),
+                    "name": message.channel.name,
+                    "parent_channel_id": str(message.channel.parent_id),
+                }
         if reg is None:
             return
         payload = {
@@ -55,6 +66,8 @@ class HubBot(discord.Client):
             "text": message.content,
             "created_at": message.created_at.isoformat(),
         }
+        if thread_info is not None:
+            payload["thread"] = thread_info
         try:
             async with self._http.post(reg.callback_url, json=payload) as resp:
                 if resp.status >= 400:
@@ -67,24 +80,43 @@ class HubBot(discord.Client):
     # -- outbound: project -> Discord ------------------------------------
 
     async def send_message(self, channel_id: int, text: str) -> dict:
-        """Send a text message. If the channel is registered, send through
-        the project's webhook so the message carries its name and avatar."""
+        """Send a text message to a channel or thread. If it (or its parent
+        channel) is registered, send through the project's webhook so the
+        message carries its name and avatar."""
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        thread = channel if isinstance(channel, discord.Thread) else None
         reg = self.registry.get(channel_id)
+        if reg is None and thread is not None:
+            reg = self.registry.get(thread.parent_id)
+
         if reg is not None and reg.webhook_url:
             webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
-            message = await webhook.send(
-                text,
-                username=reg.display_name or None,
-                avatar_url=reg.avatar_url or None,
-                wait=True,
-            )
+            kwargs: dict = {"wait": True}
+            if reg.display_name:
+                kwargs["username"] = reg.display_name
+            if reg.avatar_url:
+                kwargs["avatar_url"] = reg.avatar_url
+            if thread is not None:
+                kwargs["thread"] = thread
+            message = await webhook.send(text, **kwargs)
             return {"id": str(message.id), "channel_id": str(channel_id), "via": "webhook"}
 
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            raise LookupError(f"Channel {channel_id} is not a text channel or thread")
+        message = await channel.send(text)
+        return {"id": str(message.id), "channel_id": str(channel.id), "via": "bot"}
+
+    async def create_thread(self, channel_id: int, name: str) -> dict:
+        """Create a public thread in a text channel (e.g. one per session)."""
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             raise LookupError(f"Channel {channel_id} is not a text channel")
-        message = await channel.send(text)
-        return {"id": str(message.id), "channel_id": str(channel.id), "via": "bot"}
+        thread = await channel.create_thread(name=name)
+        return {
+            "id": str(thread.id),
+            "name": thread.name,
+            "parent_channel_id": str(channel.id),
+        }
 
     # -- registrations ----------------------------------------------------
 

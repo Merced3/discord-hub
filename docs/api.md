@@ -90,6 +90,32 @@ channel, the hub POSTs to the callback URL:
 }
 ```
 
+**Threads inherit the parent channel's registration.** A message in a
+thread of a registered channel is delivered to the same callback, with an
+extra `thread` field so the project knows which conversation it was:
+```json
+{ "thread": { "id": "111", "name": "Session 2026-09-22", "parent_channel_id": "123" } }
+```
+
+### `POST /threads`
+Create a public thread in a text channel — e.g. one thread per session,
+keeping a channel's history as a clean index of conversations.
+
+**Request**
+```json
+{ "channel_id": 123, "name": "Session 2026-09-22" }
+```
+
+**Response `201`**
+```json
+{ "id": "111", "name": "Session 2026-09-22", "parent_channel_id": "123" }
+```
+
+Send into the thread with `POST /messages` using the thread's `id` as
+`channel_id` (webhook identity applies, inherited from the parent).
+
+Errors: `404` unknown channel, `403` bot lacks Create Public Threads.
+
 ### `GET /registrations`
 List all current registrations.
 
