@@ -38,6 +38,9 @@ Discord code — they talk to this hub over a local HTTP API.
 - `src/discord_hub/api.py` — the FastAPI app other projects call
 - `src/discord_hub/config.py` — settings from environment
 - `src/discord_hub/main.py` — wires bot + API together, entry point
+- `scripts/check_permissions.py` — reports granted/missing bot permissions
+  per roadmap feature; run after any Developer Portal change
+- `scripts/show_structure.py` — prints the server tree with channel IDs
 - `docs/architecture.md` — how it works, concept-first
 - `docs/api.md` — the HTTP contract for consuming projects
 - `docs/roadmap.md` — what exists vs. what's planned

@@ -6,6 +6,8 @@
 - [x] `GET /health` — liveness for the automation-harness
 - [x] `GET /server/structure` — the caretaker's view of the server
 - [x] `POST /messages` — send a text message to a channel
+- [x] `scripts/check_permissions.py` + `scripts/show_structure.py` —
+  verified live against the real server (message delivered end-to-end)
 
 ## Next up (in rough order)
 
