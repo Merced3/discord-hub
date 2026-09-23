@@ -167,7 +167,13 @@ class HubBot(discord.Client):
         if guild is None or channel is None:
             raise LookupError(f"Unknown channel {channel_id}")
         perms = channel.permissions_for(guild.me)
-        granted = sorted(name for name, value in perms if value)
+        # Normalize discord.py's internal alias to the name Discord users
+        # (and projects) actually know.
+        granted = sorted(
+            {"read_messages": "view_channel"}.get(name, name)
+            for name, value in perms
+            if value
+        )
         return {"channel_id": str(channel_id), "permissions": granted}
 
     # -- project-owned slash commands (ADR 0003) --------------------------
