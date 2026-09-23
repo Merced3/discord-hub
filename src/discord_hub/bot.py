@@ -247,8 +247,11 @@ class HubBot(discord.Client):
             self._interactions.pop(interaction_id, None)
             raise LookupError(f"Unknown or expired interaction {interaction_id}")
         interaction, _ = entry
-        message = await interaction.followup.send(text, ephemeral=ephemeral)
-        return {"id": str(message.id)}
+        first_id = None
+        for chunk in _chunks(text):
+            message = await interaction.followup.send(chunk, ephemeral=ephemeral)
+            first_id = first_id or message.id
+        return {"id": str(first_id)}
 
     async def _on_command_error(
         self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError
