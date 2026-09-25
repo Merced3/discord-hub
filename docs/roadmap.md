@@ -57,6 +57,29 @@ next hub task.
   (open PRs #54/#58). STT/LLM/TTS remain consumer responsibilities.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
 
+## Backlog (full picture, with expectations)
+
+1. **Voice receive/streaming + speaking events** — 🔒 blocked on upstream
+   (ADR 0005). The hearing half of full duplex. Contract documented; expect
+   a few days of careful work plus real-world tuning once unblocked.
+   Biggest remaining technical risk in the project.
+2. **Live two-consumer acceptance run** — real simultaneous registrations,
+   identities, command collisions, one callback down. Offline tests cover the
+   logic; this proves it against live Discord. Expect one session, mostly
+   verification.
+3. **Caretaker proposals** — hub/agent proposes server-structure improvements;
+   nothing applied without a yes. Needs Manage Channels + Manage Roles
+   (portal session). The original 24/7-manager thesis. Medium effort;
+   the "good taste" part iterates forever.
+4. **VPS deployment (24/7 operation)** — systemd on Linux; graceful shutdown
+   finally works properly there. Remote access also makes the optional
+   **hub API key** worth adding (localhost trust model breaks remotely).
+   Small-medium ops session.
+5. **Hub-owned message deletion** — tiny; only if a consumer asks again.
+6. **"Project is offline" auto-reply** — when a command callback is
+   unreachable, answer the user with something honest instead of a bare
+   auto-defer. Small quality-of-life item.
+
 ## Explicitly out of scope (for now)
 
 - Multi-guild support (the hub serves one server; revisit only if a real
