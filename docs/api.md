@@ -128,6 +128,60 @@ Send into the thread with `POST /messages` using the thread's `id` as
 
 Errors: `404` unknown channel, `403` bot lacks Create Public Threads.
 
+### `DELETE /threads/{thread_id}`
+Delete one thread (including its Discord messages), never a parent channel.
+**Disabled by default.** The operator must explicitly configure approved parent
+channels in `THREAD_DELETION_ALLOWED_PARENT_IDS` (JSON array in `.env`, restart
+required). Targets must belong to the hub's configured server and an approved
+parent. The bot needs Discord's Manage Threads permission.
+
+Consumers must ask the owner to confirm each deletion. The hub trusts local
+callers to do so; this endpoint does not independently authenticate approval.
+No consumer database records or local files are touched. See ADR 0004.
+
+Responses: `204` deleted, `403` disabled/outside scope/Discord permission denied,
+`404` missing or not a thread, `502` other upstream Discord failure. A repeated
+call can return `404`; no automatic retries or bulk deletion.
+
+### `GET /channels/{channel_id}/history?limit=50&before=123`
+Read one page from a text channel or individual thread in the configured server.
+Requires View Channel and Read Message History. `limit` is 1–100 (default 50).
+`before` is an optional **exclusive message ID**, not a timestamp.
+
+**Response `200`** (illustrative):
+```json
+{
+  "channel_id": "123",
+  "messages": [
+    {
+      "id": "456", "channel_id": "123",
+      "author": {"id": "789", "name": "User", "bot": false},
+      "created_at": "2026-01-01T12:00:00+00:00", "edited_at": null,
+      "text": "hello",
+      "attachments": [
+        {"id": "987", "filename": "notes.txt", "size": 42,
+         "content_type": "text/plain", "url": "https://example.com/notes.txt"}
+      ]
+    }
+  ],
+  "next_before": null
+}
+```
+
+Pages are **newest first**. When a page is full, `next_before` is its last
+message's ID; pass it as `before` to fetch older messages. A full final page
+may be followed by an empty page. Stop when `next_before` is null.
+This is not a snapshot across requests; concurrent edits/deletions can change
+history while a consumer paginates.
+
+A parent-channel read excludes thread contents; read each thread separately.
+Forum containers are unsupported; forum post/thread IDs are supported.
+Attachments are metadata only, and URLs may expire. Embeds, reactions, and
+complete message-type data are not exported. This is not a lossless backup.
+
+Errors: `422` invalid query bounds, `404` missing/unsupported channel, `403`
+outside configured server or lacking permissions, `502` upstream failure.
+
 ### `GET /registrations`
 List all current registrations.
 

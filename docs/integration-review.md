@@ -66,15 +66,24 @@ successful remote update. Local routes remain on the old set on failure; the
 next successful full sync reconciles Discord. Do not describe this as an
 exactly-once distributed transaction.
 
-## Next: deletion and history (not implemented yet)
+## Second slice: deletion and history (implemented; offline tested)
 
-- Thread deletion is a reusable primitive; projects own confirmation UX and
-  application cleanup. Decide the hub's explicit approval/scope boundary before
-  enabling destructive calls. Never delete real threads just to test an endpoint.
+`DELETE /threads/{thread_id}` and `GET /channels/{channel_id}/history` now exist.
+See `api.md` for the precise contract and ADR 0004 for the agreed boundary.
+Ten additional offline tests cover scope restrictions, permission failures,
+wrong resource types, archived/uncached thread resolution, pagination, and
+query bounds. **24 total tests pass; neither new endpoint was live-tested.**
+
+- Thread deletion is disabled by default. The owner chose an explicit parent-
+  channel allowlist in hub configuration; consumers ask for confirmation per
+  deletion. No real `.env` or live Discord resources were changed.
+- Projects own confirmation UX and application cleanup. Never delete real
+  threads just to test an endpoint.
 - Registrations are routing claims, NOT authenticated project identities. The
   current API trusts local callers. No cross-project security guarantee exists.
-- Message deletion should initially target Courier's own or hub-managed webhook
-  messages, not arbitrary users' content.
+- Single-message deletion is still deferred; when added, it should initially
+  target Courier's own or hub-managed webhook messages, not arbitrary users'
+  content.
 - History should be bounded, paginated, ordered, and read-only. The hub returns
   message data; consumers decide what to archive and where.
 - Attachment metadata is not a file backup. JSON export cannot recreate message

@@ -162,6 +162,59 @@ class HubBot(discord.Client):
             "parent_channel_id": str(channel.id),
         }
 
+    async def delete_thread(self, thread_id: int) -> None:
+        """Delete only a thread beneath an operator-approved parent (ADR 0004)."""
+        if not self.settings.thread_deletion_allowed_parent_ids:
+            raise PermissionError("Thread deletion is disabled by the hub operator")
+        channel = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
+        if not isinstance(channel, discord.Thread):
+            raise LookupError(f"Channel {thread_id} is not a thread")
+        if channel.guild.id != self.settings.discord_guild_id:
+            raise PermissionError("Thread is outside the configured server")
+        if channel.parent_id not in self.settings.thread_deletion_allowed_parent_ids:
+            raise PermissionError("Thread's parent channel is not approved for deletion")
+        # Discord enforces Manage Threads; do not edit permissions automatically.
+        await channel.delete(reason="Hub cleanup request in operator-approved parent channel")
+        logger.info("deleted thread %s under parent %s", thread_id, channel.parent_id)
+
+    async def channel_history(
+        self, channel_id: int, limit: int = 50, before: int | None = None
+    ) -> dict:
+        """One newest-first page, not an archive or a recursive thread export."""
+        if not 1 <= limit <= 100 or (before is not None and before <= 0):
+            raise ValueError("limit must be 1..100; before must be a positive message ID")
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            raise LookupError(f"Channel {channel_id} is not a text channel or thread")
+        if channel.guild.id != self.settings.discord_guild_id:
+            raise PermissionError("Channel is outside the configured server")
+        perms = channel.permissions_for(channel.guild.me)
+        if not (perms.view_channel and perms.read_message_history):
+            raise PermissionError("History requires View Channel and Read Message History")
+        messages = []
+        async for message in channel.history(
+            limit=limit, before=discord.Object(id=before) if before else None,
+            oldest_first=False,
+        ):
+            messages.append({
+                "id": str(message.id), "channel_id": str(channel_id),
+                "author": {"id": str(message.author.id), "name": message.author.display_name,
+                           "bot": message.author.bot},
+                "created_at": message.created_at.isoformat(),
+                "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+                "text": message.content,
+                "attachments": [{
+                    "id": str(a.id), "filename": a.filename, "size": a.size,
+                    "content_type": a.content_type, "url": a.url,
+                } for a in message.attachments],
+            })
+        return {
+            "channel_id": str(channel_id), "messages": messages,
+            # A full final page may yield an empty next page; no extra fetch just
+            # to discover whether an older message exists.
+            "next_before": messages[-1]["id"] if len(messages) == limit else None,
+        }
+
     async def trigger_typing(self, channel_id: int) -> None:
         """Show 'bot is typing...' in a channel for ~10 seconds."""
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)

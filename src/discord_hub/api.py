@@ -7,7 +7,7 @@ from dataclasses import asdict
 from typing import Any
 
 import discord
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from .bot import HubBot
@@ -90,6 +90,32 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(
                 status_code=403, detail="Bot lacks Create Public Threads in that channel"
             ) from exc
+
+    @app.delete("/threads/{thread_id}", status_code=204)
+    async def delete_thread(thread_id: int) -> Response:
+        try:
+            await bot.delete_thread(thread_id)
+        except (LookupError, discord.NotFound) as exc:
+            raise HTTPException(status_code=404, detail="Thread not found or not a thread") from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not complete thread deletion") from exc
+        return Response(status_code=204)
+
+    @app.get("/channels/{channel_id}/history")
+    async def channel_history(
+        channel_id: int, limit: int = Query(default=50, ge=1, le=100),
+        before: int | None = Query(default=None, gt=0),
+    ) -> dict:
+        try:
+            return await bot.channel_history(channel_id, limit, before)
+        except (LookupError, discord.NotFound) as exc:
+            raise HTTPException(status_code=404, detail="Text channel or thread not found") from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not read channel history") from exc
 
     @app.post("/channels/{channel_id}/typing", status_code=202)
     async def trigger_typing(channel_id: int) -> Response:

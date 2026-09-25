@@ -38,8 +38,12 @@ next hub task.
   registration updates; safer persisted-state writes.
 - [ ] Live two-consumer acceptance run, when explicitly coordinated. Do not
   confuse the earlier one-consumer live checks with this coverage.
-- [ ] Thread deletion with an explicit destructive-operation approval boundary.
-- [ ] Read-only paginated history; optional deletion of hub-owned messages.
+- [x] Thread deletion with an operator-configured parent-channel allowlist;
+  disabled by default (ADR 0004). Consumer obtains per-deletion confirmation.
+- [x] Read-only newest-first history pages for text channels and threads.
+  **10 additional offline safety/contract tests passed (24 total).** Neither
+  deletion nor history has been live-tested in this workstream.
+- [ ] Optional deletion of hub-owned messages (ownership rules still to design).
 - [ ] Voice feasibility and ownership design, then join/leave and streaming
   audio with speaking events. STT/LLM/TTS remain consumer responsibilities.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
