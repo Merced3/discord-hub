@@ -13,6 +13,7 @@ import discord
 from .commands import CommandSpec, CommandStore, build_command
 from .config import Settings
 from .registry import ChannelTakenError, Registration, Registry
+from .voice import VoiceManager
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class HubBot(discord.Client):
         intents.guilds = True
         intents.messages = True
         intents.message_content = True
+        intents.voice_states = True  # required for voice handshake (session id)
         super().__init__(intents=intents)
         self.settings = settings
         self.registry = registry
@@ -48,6 +50,7 @@ class HubBot(discord.Client):
         self._interactions: dict[str, tuple[discord.Interaction, float]] = {}
         self._commands_lock = asyncio.Lock()
         self._registrations_lock = asyncio.Lock()
+        self.voice = VoiceManager(settings.discord_guild_id)
 
     async def setup_hook(self) -> None:
         self._http = aiohttp.ClientSession()
@@ -58,6 +61,7 @@ class HubBot(discord.Client):
         logger.info("Synchronized %d command(s) to the guild.", len(synced))
 
     async def close(self) -> None:
+        await self.voice.force_disconnect()
         await self._http.close()
         await super().close()
 
@@ -342,6 +346,17 @@ class HubBot(discord.Client):
                 await interaction.response.send_message(message, ephemeral=True)
         except discord.HTTPException:
             pass
+
+    # -- voice (ADR 0005) --------------------------------------------------
+
+    async def voice_join(self, channel_id: int, owner: str) -> dict:
+        try:
+            channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        except discord.NotFound as exc:
+            raise LookupError(f"Unknown channel {channel_id}") from exc
+        if not isinstance(channel, discord.VoiceChannel):
+            raise LookupError(f"Channel {channel_id} is not a voice channel")
+        return await self.voice.join(channel, owner)
 
     # -- registrations ----------------------------------------------------
 

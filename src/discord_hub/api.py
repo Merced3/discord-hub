@@ -7,12 +7,13 @@ from dataclasses import asdict
 from typing import Any
 
 import discord
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from .bot import HubBot
 from .commands import CommandNameTakenError, CommandSpec
 from .registry import ChannelTakenError
+from .voice import NotVoiceOwnerError, VoiceBusyError
 
 
 class SendMessageRequest(BaseModel):
@@ -57,6 +58,15 @@ class SetCommandsRequest(BaseModel):
 class FollowupRequest(BaseModel):
     text: str
     ephemeral: bool = False
+
+
+class VoiceJoinRequest(BaseModel):
+    channel_id: int
+    owner: str  # the project's callback URL, consistent with registrations
+
+
+class VoiceOwnerRequest(BaseModel):
+    owner: str
 
 
 def create_api(bot: HubBot, started_at: float) -> FastAPI:
@@ -191,6 +201,60 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         if reg is None:
             raise HTTPException(status_code=404, detail="channel not registered")
         return Response(status_code=204)
+
+    # -- voice (ADR 0005) --------------------------------------------------
+
+    def _voice_errors(exc: Exception) -> HTTPException:
+        if isinstance(exc, (VoiceBusyError, NotVoiceOwnerError)):
+            status = 409 if isinstance(exc, VoiceBusyError) else 403
+            return HTTPException(status_code=status, detail=str(exc))
+        if isinstance(exc, LookupError):
+            return HTTPException(status_code=404, detail=str(exc))
+        return HTTPException(status_code=502, detail="Discord voice operation failed")
+
+    @app.get("/voice/status")
+    async def voice_status() -> dict:
+        return bot.voice.status()
+
+    @app.post("/voice/join")
+    async def voice_join(body: VoiceJoinRequest) -> dict:
+        try:
+            return await bot.voice_join(body.channel_id, body.owner)
+        except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
+            raise _voice_errors(exc) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not connect voice") from exc
+
+    @app.post("/voice/leave", status_code=204)
+    async def voice_leave(body: VoiceOwnerRequest) -> Response:
+        try:
+            await bot.voice.leave(body.owner)
+        except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
+            raise _voice_errors(exc) from exc
+        return Response(status_code=204)
+
+    @app.post("/voice/stop", status_code=204)
+    async def voice_stop(body: VoiceOwnerRequest) -> Response:
+        try:
+            await bot.voice.stop(body.owner)
+        except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
+            raise _voice_errors(exc) from exc
+        return Response(status_code=204)
+
+    @app.post("/voice/play", status_code=202)
+    async def voice_play(request: Request) -> Response:
+        """Body: raw PCM s16le 48kHz stereo. Owner comes from ?owner=..."""
+        owner = request.query_params.get("owner")
+        if not owner:
+            raise HTTPException(status_code=422, detail="owner query parameter required")
+        pcm = await request.body()
+        if not pcm:
+            raise HTTPException(status_code=422, detail="empty audio body")
+        try:
+            await bot.voice.play_pcm(owner, pcm)
+        except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
+            raise _voice_errors(exc) from exc
+        return Response(status_code=202)
 
     @app.get("/server/structure")
     async def server_structure() -> dict:

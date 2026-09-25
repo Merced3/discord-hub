@@ -46,8 +46,15 @@ next hub task.
   **11 additional offline safety/contract tests passed (25 total).** Neither
   deletion nor history has been live-tested in this workstream.
 - [ ] Optional deletion of hub-owned messages (ownership rules still to design).
-- [ ] Voice feasibility and ownership design, then join/leave and streaming
-  audio with speaking events. STT/LLM/TTS remain consumer responsibilities.
+- [x] **Voice send + ownership** (ADR 0005) — join/leave/play/stop/status,
+  one owned connection per guild (409 on contention, 403 for non-owners),
+  raw-PCM playback. Live-verified: Courier joined Livestream and played
+  audio through Discord's E2EE (DAVE) stack. 13 offline ownership tests.
+  Required the `voice_states` gateway intent (declared in code; not a
+  privileged intent, no portal toggle needed).
+- [ ] Voice receive/streaming + speaking events — contract documented in
+  ADR 0005; blocked on upstream DAVE-decryption support in voice-recv
+  (open PRs #54/#58). STT/LLM/TTS remain consumer responsibilities.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
 
 ## Explicitly out of scope (for now)

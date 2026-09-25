@@ -5,8 +5,10 @@ description = "Single always-on Discord connection and local API for all project
 requires-python = ">=3.13"
 dependencies = [
     "automation-harness",
-    "discord.py>=2.4",
+    "davey>=0.1.4",
+    "discord.py>=2.7",
     "fastapi>=0.115",
+    "pynacl>=1.5",
     "uvicorn>=0.30",
     "pydantic-settings>=2.5",
 ]

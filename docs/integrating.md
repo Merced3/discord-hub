@@ -82,6 +82,15 @@ idempotent and keeps the hub in sync after restarts.
 - `GET /channels/{id}/history` — paginated, newest-first reads. You own
   pagination, storage, and retention. Not a lossless backup.
 
+## Voice
+
+One voice connection per server, owned by one project at a time. Join with
+your callback URL as `owner` (`POST /voice/join`); you get `409` if another
+project holds it. Play audio by POSTing raw PCM (s16le, 48 kHz, stereo) to
+`/voice/play?owner=...`; leave with `/voice/leave`. Hearing users
+(receive-audio) is a documented contract blocked on an upstream library —
+see ADR 0005; build your pipeline against it, but it isn't live yet.
+
 ## Timeouts and timestamps
 
 - Discord renders `<t:UNIX_TIMESTAMP:R>` as "in 3 hours" natively. No

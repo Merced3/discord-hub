@@ -270,11 +270,34 @@ Discord library for this:
 
 Use a Unix timestamp; styles: `t T d D f F R`.
 
+## Voice (ADR 0005)
+
+One voice connection per server, explicitly owned. Owner = the project's
+callback URL (same identity as registrations and commands).
+
+### `GET /voice/status`
+`{ "connected": bool, "owner": "..."|null, "channel_id": "..."|null }`.
+
+### `POST /voice/join`
+`{ "channel_id": 123, "owner": "http://localhost:9000/discord" }` → `200` with
+status. Same owner may rejoin to move channels. `404` unknown/not a voice
+channel, **`409` another project owns the connection**.
+
+### `POST /voice/leave`, `POST /voice/stop`
+`{ "owner": "..." }` → `204`. `403` not the owner, `404` no active connection.
+
+### `POST /voice/play?owner=...`
+Body is **raw PCM audio: s16le, 48 kHz, stereo** (`application/octet-stream`).
+`202` accepted. Replaces anything currently playing (use `/voice/stop` to
+interrupt explicitly). No file paths — the hub never reads a consumer's disk.
+
 ## Planned (not yet implemented)
 
-### `POST /voice/join`, `POST /voice/leave`, `POST /voice/play`
-Voice channel control — the foundation the teaching agent's audio
-conversations will be built on.
+### `WS /voice/stream`
+Bidirectional per-speaker PCM plus speaking events
+(`{type: "speaking", user_id, state}`). Blocked until a voice-recv release
+ships DAVE decryption (ADR 0005); the contract is stable enough for
+consumers to build against.
 
 ## Versioning rule
 
