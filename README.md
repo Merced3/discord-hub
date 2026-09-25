@@ -38,7 +38,7 @@ The hub runs on the local machine and exposes a small HTTP API
 
 - `POST /messages` — send a text message to a channel
 - `GET /server/structure` — see the server's channels, roles, and layout
-- `POST /voice/join` — join a voice channel (foundation for the Teaching Agent)
+- Voice join/leave/streaming — planned, not implemented yet
 
 Incoming Discord messages are delivered to the project that registered
 for that channel, via a webhook-style callback.
@@ -63,4 +63,17 @@ Requires a `.env` (see `.env.example`). Runtime state lives in `data/`
 
 ## Status
 
-Early scaffold. See `docs/roadmap.md` for where this is headed.
+Text routing, threads, webhook identity, and project-owned slash commands are
+implemented. Two-consumer reliability now has offline regression coverage;
+voice is still planned. See `docs/roadmap.md` and
+`docs/integration-review.md` for scope, evidence, and remaining work.
+
+## Tests (no live Discord required)
+
+```bash
+python -m pip install -e ".[dev]"
+python -m unittest discover -s tests -v
+```
+
+Tests use temporary state and fake Discord operations; callbacks run on local
+HTTP servers. They do not modify real registrations or consuming projects.

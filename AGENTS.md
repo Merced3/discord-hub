@@ -44,6 +44,17 @@ Discord code — they talk to this hub over a local HTTP API.
 - `docs/architecture.md` — how it works, concept-first
 - `docs/api.md` — the HTTP contract for consuming projects
 - `docs/roadmap.md` — what exists vs. what's planned
+- `docs/integration-review.md` — two-consumer requirements, assessment,
+  implementation evidence, boundaries, and handoff notes
+- `tests/test_multi_client.py` — offline two-project regression suite;
+  run with `python -m unittest discover -s tests -v`
+
+## Repository boundaries
+
+Only edit discord-hub in this session. The sibling socratic-partner and
+teaching-agent repositories are read-only requirements sources, including
+`docs/integrations/`. Record fulfillment/handoff notes here, not there.
+Do not start live bots or mutate server state as part of automated tests.
 
 ## When picking up a new task
 

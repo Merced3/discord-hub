@@ -47,7 +47,9 @@ class Registry:
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         data = [asdict(r) for r in self._by_channel.values()]
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary = self._path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary.replace(self._path)
 
     def get(self, channel_id: int) -> Registration | None:
         return self._by_channel.get(channel_id)
@@ -62,10 +64,18 @@ class Registry:
                 f"channel {reg.channel_id} is already registered to {existing.callback_url}"
             )
         self._by_channel[reg.channel_id] = reg
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            del self._by_channel[reg.channel_id]
+            raise
 
     def remove(self, channel_id: int) -> Registration | None:
         reg = self._by_channel.pop(channel_id, None)
         if reg is not None:
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._by_channel[channel_id] = reg
+                raise
         return reg

@@ -25,18 +25,28 @@
 - [x] **Messaging extras** — reply-to-message, auto-chunking, typing
   indicators, channel permission preflight. Verified live.
 
-## Next up (in rough order)
+## Two-consumer workstream
 
-1. **Migrate socratic-partner** — replace its `discord_bot.py` internals
-   with hub API calls. Done in the socratic-partner repo/session.
-2. **Voice foundation** — join/leave/play. The teaching agent's
-   prerequisite.
-3. **Caretaker proposals** — given the structure snapshot, the hub (or an
-   agent driving it) can suggest a better server layout. Always
-   permission-gated; nothing is applied without a yes.
+See `integration-review.md` for the assessment of both consumers' requests.
+The user reports both consumers now use the hub; migration is no longer the
+next hub task.
+
+- [x] Automated two-project routing, webhook identity, command collision,
+  concurrent registration, callback isolation, and failure-recovery checks.
+  **14 offline tests passed**; Discord operations are mocked, not live-verified.
+- [x] Bounded ordinary callback delivery (five seconds); serialized command and
+  registration updates; safer persisted-state writes.
+- [ ] Live two-consumer acceptance run, when explicitly coordinated. Do not
+  confuse the earlier one-consumer live checks with this coverage.
+- [ ] Thread deletion with an explicit destructive-operation approval boundary.
+- [ ] Read-only paginated history; optional deletion of hub-owned messages.
+- [ ] Voice feasibility and ownership design, then join/leave and streaming
+  audio with speaking events. STT/LLM/TTS remain consumer responsibilities.
+- [ ] Caretaker proposals — nothing applied without explicit permission.
 
 ## Explicitly out of scope (for now)
 
 - Multi-guild support (the hub serves one server; revisit only if a real
   second server appears)
-- Message history/archiving
+- Archive storage, retention policies, and consumer database cleanup. Read-only
+  message-history access is now planned; archival policy remains outside the hub.

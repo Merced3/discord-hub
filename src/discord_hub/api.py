@@ -120,6 +120,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             synced = await bot.set_commands(body.callback_url, specs)
         except CommandNameTakenError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except discord.Forbidden as exc:
             raise HTTPException(
                 status_code=403,

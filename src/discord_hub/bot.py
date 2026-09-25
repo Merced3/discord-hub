@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _MESSAGE_LIMIT = 1_900  # Discord's is 2_000; leave margin
 _INTERACTION_TTL_S = 14 * 60  # interaction tokens live 15 minutes
 _CALLBACK_BUDGET_S = 2.5  # Discord allows 3s for the initial response
+_MESSAGE_CALLBACK_BUDGET_S = 5.0  # acknowledge promptly; do work in the consumer
 
 
 def _chunks(text: str, limit: int = _MESSAGE_LIMIT) -> list[str]:
@@ -45,6 +46,8 @@ class HubBot(discord.Client):
         self.ready_event: asyncio.Event  # assigned in main before startup
         self._http: aiohttp.ClientSession  # created in setup_hook
         self._interactions: dict[str, tuple[discord.Interaction, float]] = {}
+        self._commands_lock = asyncio.Lock()
+        self._registrations_lock = asyncio.Lock()
 
     async def setup_hook(self) -> None:
         self._http = aiohttp.ClientSession()
@@ -91,13 +94,17 @@ class HubBot(discord.Client):
         if thread_info is not None:
             payload["thread"] = thread_info
         try:
-            async with self._http.post(reg.callback_url, json=payload) as resp:
-                if resp.status >= 400:
+            async with self._http.post(
+                reg.callback_url, json=payload,
+                timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                allow_redirects=False,
+            ) as resp:
+                if not 200 <= resp.status < 300:
                     logger.warning(
                         "delivery to %s failed: HTTP %s", reg.callback_url, resp.status
                     )
-        except aiohttp.ClientError:
-            logger.exception("delivery to %s failed", reg.callback_url)
+        except (aiohttp.ClientError, TimeoutError):
+            logger.warning("message callback failed for channel %s; not retried", message.channel.id)
 
     # -- outbound: project -> Discord ------------------------------------
 
@@ -188,11 +195,26 @@ class HubBot(discord.Client):
                 )
 
     async def set_commands(self, callback_url: str, specs: list[CommandSpec]) -> int:
-        self.command_store.set_project_commands(callback_url, specs)
-        self._rebuild_commands()
-        guild = discord.Object(id=self.settings.discord_guild_id)
-        synced = await self.tree.sync(guild=guild)
-        return len(synced)
+        # Guild command sync replaces the entire guild set. Serialize updates
+        # and keep every other project's definitions in the candidate tree.
+        async with self._commands_lock:
+            self.command_store.validate_project_commands(callback_url, specs)
+            candidate = {**self.command_store.all(), callback_url: specs}
+            built = [build_command(spec, self._invoke_command)
+                     for project_specs in candidate.values() for spec in project_specs]
+            guild = discord.Object(id=self.settings.discord_guild_id)
+            self.tree.clear_commands(guild=guild)
+            try:
+                for command in built:
+                    self.tree.add_command(command, guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                self.command_store.set_project_commands(callback_url, specs)
+            except Exception:
+                self._rebuild_commands()
+                # A network timeout can leave Discord's remote result unknown;
+                # the next successful full sync reconciles it. Local routes stay old.
+                raise
+            return len(synced)
 
     async def _invoke_command(
         self, spec: CommandSpec, interaction: discord.Interaction, options: dict[str, Any]
@@ -275,6 +297,15 @@ class HubBot(discord.Client):
         display_name: str | None = None,
         avatar_url: str | None = None,
     ) -> Registration:
+        async with self._registrations_lock:
+            return await self._register_channel(channel_id, callback_url, display_name, avatar_url)
+
+    async def _register_channel(
+        self, channel_id: int, callback_url: str,
+        display_name: str | None, avatar_url: str | None,
+    ) -> Registration:
+        if self.registry.get(channel_id) is not None:
+            raise ChannelTakenError(f"channel {channel_id} is already registered")
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             raise LookupError(f"Channel {channel_id} is not a text channel")
@@ -288,13 +319,20 @@ class HubBot(discord.Client):
         )
         try:
             self.registry.add(reg)
-        except ChannelTakenError:
-            await webhook.delete(reason="registration failed: channel already taken")
+        except Exception:
+            try:
+                await webhook.delete(reason="registration could not be saved")
+            except discord.HTTPException:
+                logger.warning("could not clean up webhook for channel %s", channel_id)
             raise
         logger.info("registered channel %s -> %s", channel_id, callback_url)
         return reg
 
     async def deregister(self, channel_id: int) -> Registration | None:
+        async with self._registrations_lock:
+            return await self._deregister_channel(channel_id)
+
+    async def _deregister_channel(self, channel_id: int) -> Registration | None:
         reg = self.registry.remove(channel_id)
         if reg is not None and reg.webhook_url:
             webhook = discord.Webhook.from_url(reg.webhook_url, client=self)

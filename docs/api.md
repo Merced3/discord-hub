@@ -80,7 +80,8 @@ project's identity (ADR 0002). Registration persists across hub restarts.
 
 Errors: `409` channel already claimed by another project (the hub refuses
 ambiguity rather than picking a winner), `404` unknown channel, `403`
-bot lacks Manage Webhooks.
+bot lacks Manage Webhooks. A duplicate claim is rejected before creating a
+webhook. Registrations route traffic; they do not authenticate API callers.
 
 **Inbound delivery** — when a (human) message arrives in a registered
 channel, the hub POSTs to the callback URL:
@@ -93,6 +94,13 @@ channel, the hub POSTs to the callback URL:
   "created_at": "2026-01-01T12:00:00+00:00"
 }
 ```
+
+Callbacks must acknowledge ordinary messages within **five seconds**. Return
+2xx promptly and do slow processing in the consumer's background worker.
+Redirects are not followed. Timeout, connection failure, or non-2xx is logged;
+there is currently **no retry or durable delivery queue**. Other message
+callbacks may run concurrently; ordering and exactly-once delivery are not
+promised.
 
 **Threads inherit the parent channel's registration.** A message in a
 thread of a registered channel is delivered to the same callback, with an
@@ -157,7 +165,11 @@ whole set; the hub registers them with Discord and routes invocations to
 Option `type`: `integer` | `string` | `boolean` | `number`.
 
 **Response `200`** — `{ "synced": 1 }`. Errors: `409` name owned by
-another project, `403` bot invite lacks the `applications.commands` scope.
+another project, `403` bot invite lacks the `applications.commands` scope,
+`422` duplicate names within a declaration or invalid command construction.
+Updates are serialized and keep other projects' commands. Saved declarations
+change after successful Discord sync. On sync failure local routes remain
+unchanged; a later full sync reconciles any uncertain remote outcome.
 
 **Invocation delivery** — when a user runs a command, the hub POSTs to the
 callback:

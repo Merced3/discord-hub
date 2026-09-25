@@ -59,7 +59,9 @@ class CommandStore:
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         data = {url: [asdict(s) for s in specs] for url, specs in self._by_project.items()}
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary = self._path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        temporary.replace(self._path)
 
     def owner_of(self, name: str) -> str | None:
         for url, specs in self._by_project.items():
@@ -67,8 +69,11 @@ class CommandStore:
                 return url
         return None
 
-    def set_project_commands(self, callback_url: str, specs: list[CommandSpec]) -> None:
-        """Replace a project's command set. Refuses name clashes with other projects."""
+    def validate_project_commands(self, callback_url: str, specs: list[CommandSpec]) -> None:
+        """Check ownership without changing the currently published routes."""
+        names = [spec.name for spec in specs]
+        if len(names) != len(set(names)):
+            raise ValueError("duplicate command names in one declaration")
         for url, existing in self._by_project.items():
             if url == callback_url:
                 continue
@@ -77,8 +82,16 @@ class CommandStore:
                 raise CommandNameTakenError(
                     f"command name(s) already owned by {url}: {', '.join(sorted(clash))}"
                 )
-        self._by_project[callback_url] = specs
-        self._save()
+    def set_project_commands(self, callback_url: str, specs: list[CommandSpec]) -> None:
+        """Replace a project's set after validation and successful Discord sync."""
+        self.validate_project_commands(callback_url, specs)
+        previous = self._by_project
+        self._by_project = {**previous, callback_url: specs}
+        try:
+            self._save()
+        except Exception:
+            self._by_project = previous
+            raise
 
     def all(self) -> dict[str, list[CommandSpec]]:
         return dict(self._by_project)
