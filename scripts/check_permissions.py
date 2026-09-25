@@ -15,8 +15,9 @@ from _connect import connected_bot, run
 FEATURES: dict[str, list[str]] = {
     "Read server structure (works now)": ["view_channel"],
     "Send messages (works now)": ["view_channel", "send_messages", "read_message_history"],
-    "Per-project identity via webhooks (planned)": ["manage_webhooks"],
+    "Per-project identity via webhooks (works now)": ["manage_webhooks"],
     "Threads for per-session conversations": ["create_public_threads"],
+    "Thread deletion (opt-in per registration)": ["manage_threads"],
     "Voice conversations (planned)": ["connect", "speak"],
     "Caretaker edits to server structure (planned)": ["manage_channels", "manage_roles"],
 }

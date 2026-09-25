@@ -23,6 +23,10 @@ class Registration:
     display_name: str | None = None
     avatar_url: str | None = None
     webhook_url: str | None = None
+    # Declared intent: threads under this channel may be deleted on request.
+    # Default False; consumers opt in and still confirm each deletion with
+    # the owner (ADR 0004).
+    allow_thread_deletion: bool = False
 
 
 class ChannelTakenError(RuntimeError):

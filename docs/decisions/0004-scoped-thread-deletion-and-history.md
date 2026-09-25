@@ -1,6 +1,8 @@
 # 0004 — Scoped thread deletion; history reads without archival policy
 
 **Status:** accepted by the owner during the two-consumer review.
+**Revised:** the scope mechanism moved from a hub `.env` allowlist to a
+per-registration flag (see below), at the owner's direction.
 
 ## Why
 
@@ -11,30 +13,35 @@ backup/collection tools. Reading messages does not make the hub an archive.
 
 ## Deletion decision
 
-- `DELETE /threads/{thread_id}` is disabled by default.
-- The operator pre-approves **parent channels** in the hub's configuration:
-  `THREAD_DELETION_ALLOWED_PARENT_IDS=[123456789012345678]`.
-- The target must be a thread in the configured server beneath an approved
-  parent. A parent channel itself can never be deleted through this endpoint.
+- `DELETE /threads/{thread_id}` works only for threads whose **parent
+  channel's registration** declared `allow_thread_deletion: true`
+  (default `false`). The project opts in when it claims the channel — one
+  config place, in the project's own registration call. The hub keeps no
+  per-project values in its own configuration.
+- Deregistering the channel revokes the capability automatically.
+- The target must be a thread in the configured server; a parent channel
+  itself can never be deleted through this endpoint.
 - Consumers must obtain the user's confirmation for each deletion. The hub
   does not know what a lesson, conversation, or cleanup command means.
-- Discord permissions still apply (Manage Threads); the hub never grants itself
-  permissions or enables an allowlist based on a registration request.
+- Discord permissions still apply (Manage Threads); the hub never grants
+  itself permissions.
 
-This is a trusted-local-consumer policy, NOT independently verified consent.
-The API currently has no caller authentication. Any caller able to access it
-can delete an allowed thread. If untrusted clients or remote API access are
-introduced, add authenticated/scoped access before relying on this boundary.
-Binding to localhost is important but not an authentication system.
+This is declared intent, NOT independently verified consent. The API has no
+caller authentication: any local caller could register with the flag set.
+The real guardrail is the consumer asking the owner before each deletion;
+the flag exists to make intent explicit and prevent accidents. If untrusted
+clients or remote API access are ever introduced, add authenticated/scoped
+access before relying on this boundary.
 
 ## Failure contract
 
-204 means Discord acknowledged deletion. 403 means disabled, outside the
-allowlist/server, or missing Discord permissions. 404 means missing or wrong
-resource type. 502 means Discord rejected/failed the upstream operation in
-another way. A repeated delete may return 404; consumers can reconcile an
-already-missing thread as appropriate. No retries, bulk cleanup, or deletion
-of application records is hidden inside this operation.
+204 means Discord acknowledged deletion. 403 means the parent's registration
+didn't opt in (or is gone), the thread is outside the server, or Discord
+permissions are missing. 404 means missing or wrong resource type. 502 means
+Discord rejected/failed the upstream operation in another way. A repeated
+delete may return 404; consumers can reconcile an already-missing thread as
+appropriate. No retries, bulk cleanup, or deletion of application records is
+hidden inside this operation.
 
 ## History decision
 

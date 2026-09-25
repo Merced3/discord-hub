@@ -27,7 +27,8 @@
 
 ## Two-consumer workstream
 
-See `integration-review.md` for the assessment of both consumers' requests.
+See `docs/reviews/2026-09-23-two-consumer-review.md` for the assessment of
+both consumers' requests, and `docs/integrating.md` for the consumer guide.
 The user reports both consumers now use the hub; migration is no longer the
 next hub task.
 
@@ -38,10 +39,11 @@ next hub task.
   registration updates; safer persisted-state writes.
 - [ ] Live two-consumer acceptance run, when explicitly coordinated. Do not
   confuse the earlier one-consumer live checks with this coverage.
-- [x] Thread deletion with an operator-configured parent-channel allowlist;
-  disabled by default (ADR 0004). Consumer obtains per-deletion confirmation.
+- [x] Thread deletion scoped by per-registration opt-in flag
+  (`allow_thread_deletion`, default false) with per-deletion confirmation
+  collected by the consumer (ADR 0004).
 - [x] Read-only newest-first history pages for text channels and threads.
-  **10 additional offline safety/contract tests passed (24 total).** Neither
+  **11 additional offline safety/contract tests passed (25 total).** Neither
   deletion nor history has been live-tested in this workstream.
 - [ ] Optional deletion of hub-owned messages (ownership rules still to design).
 - [ ] Voice feasibility and ownership design, then join/leave and streaming

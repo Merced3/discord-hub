@@ -31,6 +31,7 @@ class RegisterRequest(BaseModel):
     callback_url: str
     display_name: str | None = None
     avatar_url: str | None = None
+    allow_thread_deletion: bool = False
 
 
 class CommandOption(BaseModel):
@@ -171,7 +172,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
     async def register(body: RegisterRequest) -> dict:
         try:
             reg = await bot.register(
-                body.channel_id, body.callback_url, body.display_name, body.avatar_url
+                body.channel_id, body.callback_url, body.display_name, body.avatar_url,
+                body.allow_thread_deletion,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

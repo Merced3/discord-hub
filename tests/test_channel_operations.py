@@ -13,7 +13,7 @@ from discord_hub.api import create_api
 from discord_hub.bot import HubBot
 from discord_hub.commands import CommandStore
 from discord_hub.config import Settings
-from discord_hub.registry import Registry
+from discord_hub.registry import Registration, Registry
 
 
 class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
@@ -21,9 +21,9 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
         temp = TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
-        settings = Settings(_env_file=None, discord_token="fake", discord_guild_id=1,
-                            thread_deletion_allowed_parent_ids=[])
-        self.bot = HubBot(settings, Registry(root / "regs.json"), CommandStore(root / "cmds.json"))
+        settings = Settings(_env_file=None, discord_token="fake", discord_guild_id=1)
+        self.registry = Registry(root / "regs.json")
+        self.bot = HubBot(settings, self.registry, CommandStore(root / "cmds.json"))
         self.thread = Mock(spec=discord.Thread)
         self.thread.id, self.thread.parent_id = 11, 10
         self.thread.guild = SimpleNamespace(id=1, me=object())
@@ -38,17 +38,28 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
         )
         self.addAsyncCleanup(self.client.aclose)
 
-    async def test_deletion_disabled_by_default_without_resolving_target(self):
+    def opt_in(self, channel_id: int = 10, flag: bool = True) -> None:
+        self.registry.add(Registration(
+            channel_id=channel_id, callback_url="http://127.0.0.1:9/cb",
+            allow_thread_deletion=flag,
+        ))
+
+    async def test_deletion_refused_when_parent_not_opted_in(self):
+        self.opt_in(flag=False)
         response = await self.client.delete("/threads/11")
         self.assertEqual(response.status_code, 403)
-        self.bot.get_channel.assert_not_called()
         self.thread.delete.assert_not_awaited()
 
-    async def test_deletion_allowed_only_under_approved_parent_and_guild(self):
-        self.bot.settings.thread_deletion_allowed_parent_ids = [10]
-        self.thread.parent_id = 20
+    async def test_deletion_refused_when_parent_unregistered(self):
+        response = await self.client.delete("/threads/11")
+        self.assertEqual(response.status_code, 403)
+        self.thread.delete.assert_not_awaited()
+
+    async def test_deletion_allowed_only_under_opted_in_parent_and_configured_guild(self):
+        self.opt_in()
+        self.thread.parent_id = 20  # different, unregistered parent
         self.assertEqual((await self.client.delete("/threads/11")).status_code, 403)
-        self.thread.parent_id, self.thread.guild.id = 10, 2
+        self.thread.parent_id, self.thread.guild.id = 10, 2  # wrong server
         self.assertEqual((await self.client.delete("/threads/11")).status_code, 403)
         self.thread.delete.assert_not_awaited()
         self.thread.guild.id = 1
@@ -58,7 +69,7 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.thread.delete.assert_awaited_once()
 
     async def test_deletion_never_deletes_a_parent_channel(self):
-        self.bot.settings.thread_deletion_allowed_parent_ids = [10]
+        self.opt_in()
         parent = Mock(spec=discord.TextChannel)
         parent.delete = AsyncMock()
         self.bot.get_channel.return_value = parent
@@ -66,14 +77,14 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
         parent.delete.assert_not_awaited()
 
     async def test_archived_uncached_thread_can_be_resolved(self):
-        self.bot.settings.thread_deletion_allowed_parent_ids = [10]
+        self.opt_in()
         self.bot.get_channel.return_value = None
         self.thread.archived = True
         self.assertEqual((await self.client.delete("/threads/11")).status_code, 204)
         self.bot.fetch_channel.assert_awaited_once_with(11)
 
     async def test_discord_deletion_errors_have_explicit_statuses(self):
-        self.bot.settings.thread_deletion_allowed_parent_ids = [10]
+        self.opt_in()
         for error_cls, status, expected in [
             (discord.Forbidden, 403, 403), (discord.NotFound, 404, 404),
             (discord.HTTPException, 500, 502),

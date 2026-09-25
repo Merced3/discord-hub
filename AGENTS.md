@@ -15,9 +15,10 @@ Discord code — they talk to this hub over a local HTTP API.
    the change is wrong. Push that knowledge into the hub.
 3. **Everything is permission-gated.** The hub may *propose* changes to
    server structure, but never applies them without explicit confirmation
-   from the owner. Thread deletion specifically uses operator-approved parent
-   channels plus per-deletion confirmation collected by the consumer (ADR 0004).
-   This trusts local consumers; registration is not caller authentication.
+   from the owner. Thread deletion requires the channel's registration to
+   opt in (`allow_thread_deletion`) plus per-deletion confirmation collected
+   by the consumer (ADR 0004). The flag is declared intent, not caller
+   authentication.
 4. **Modularity over cleverness.** Features (messaging, voice, server
    caretaking) must be independently removable.
 5. **Harness-embedded, not harness-supervised.** The hub installs the
@@ -46,8 +47,10 @@ Discord code — they talk to this hub over a local HTTP API.
 - `docs/architecture.md` — how it works, concept-first
 - `docs/api.md` — the HTTP contract for consuming projects
 - `docs/roadmap.md` — what exists vs. what's planned
-- `docs/integration-review.md` — two-consumer requirements, assessment,
-  implementation evidence, boundaries, and handoff notes
+- `docs/integrating.md` — the consumer guide: how projects build against
+  the hub. Update it whenever the contract changes.
+- `docs/reviews/` — dated review records (requirements assessments and the
+  evidence at the time)
 - `tests/test_channel_operations.py` — offline deletion-safety and history tests
 - `tests/test_multi_client.py` — offline two-project regression suite;
   run with `python -m unittest discover -s tests -v`

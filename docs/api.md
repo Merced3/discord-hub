@@ -71,10 +71,13 @@ project's identity (ADR 0002). Registration persists across hub restarts.
   "channel_id": 123,
   "callback_url": "http://localhost:9000/discord",
   "display_name": "Socrates",
-  "avatar_url": "https://example.com/socrates.png"
+  "avatar_url": "https://example.com/socrates.png",
+  "allow_thread_deletion": true
 }
 ```
-`display_name` and `avatar_url` are optional.
+`display_name` and `avatar_url` are optional. `allow_thread_deletion`
+(default `false`) opts the channel's threads into `DELETE /threads/{id}`;
+deregistering revokes it.
 
 **Response `201`** — the registration, including the created `webhook_url`.
 
@@ -130,17 +133,18 @@ Errors: `404` unknown channel, `403` bot lacks Create Public Threads.
 
 ### `DELETE /threads/{thread_id}`
 Delete one thread (including its Discord messages), never a parent channel.
-**Disabled by default.** The operator must explicitly configure approved parent
-channels in `THREAD_DELETION_ALLOWED_PARENT_IDS` (JSON array in `.env`, restart
-required). Targets must belong to the hub's configured server and an approved
-parent. The bot needs Discord's Manage Threads permission.
+Works only when the thread's **parent channel registration** declared
+`"allow_thread_deletion": true` (ADR 0004). The target must belong to the
+hub's configured server, and the bot needs Discord's Manage Threads
+permission.
 
-Consumers must ask the owner to confirm each deletion. The hub trusts local
-callers to do so; this endpoint does not independently authenticate approval.
-No consumer database records or local files are touched. See ADR 0004.
+Consumers must ask the owner to confirm each deletion. The flag is declared
+intent, not verified consent — the hub does not independently authenticate
+callers. No consumer database records or local files are touched.
 
-Responses: `204` deleted, `403` disabled/outside scope/Discord permission denied,
-`404` missing or not a thread, `502` other upstream Discord failure. A repeated
+Responses: `204` deleted, `403` parent registration didn't opt in (or doesn't
+exist), outside the configured server, or Discord permission denied, `404`
+missing or not a thread, `502` other upstream Discord failure. A repeated
 call can return `404`; no automatic retries or bulk deletion.
 
 ### `GET /channels/{channel_id}/history?limit=50&before=123`

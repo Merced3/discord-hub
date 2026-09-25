@@ -163,16 +163,18 @@ class HubBot(discord.Client):
         }
 
     async def delete_thread(self, thread_id: int) -> None:
-        """Delete only a thread beneath an operator-approved parent (ADR 0004)."""
-        if not self.settings.thread_deletion_allowed_parent_ids:
-            raise PermissionError("Thread deletion is disabled by the hub operator")
+        """Delete a thread whose parent channel's registration opted in to
+        thread deletion (ADR 0004). Never deletes a parent channel."""
         channel = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
         if not isinstance(channel, discord.Thread):
             raise LookupError(f"Channel {thread_id} is not a thread")
         if channel.guild.id != self.settings.discord_guild_id:
             raise PermissionError("Thread is outside the configured server")
-        if channel.parent_id not in self.settings.thread_deletion_allowed_parent_ids:
-            raise PermissionError("Thread's parent channel is not approved for deletion")
+        reg = self.registry.get(channel.parent_id)
+        if reg is None or not reg.allow_thread_deletion:
+            raise PermissionError(
+                "Thread deletion is not enabled for this channel's registration"
+            )
         # Discord enforces Manage Threads; do not edit permissions automatically.
         await channel.delete(reason="Hub cleanup request in operator-approved parent channel")
         logger.info("deleted thread %s under parent %s", thread_id, channel.parent_id)
@@ -349,13 +351,17 @@ class HubBot(discord.Client):
         callback_url: str,
         display_name: str | None = None,
         avatar_url: str | None = None,
+        allow_thread_deletion: bool = False,
     ) -> Registration:
         async with self._registrations_lock:
-            return await self._register_channel(channel_id, callback_url, display_name, avatar_url)
+            return await self._register_channel(
+                channel_id, callback_url, display_name, avatar_url, allow_thread_deletion
+            )
 
     async def _register_channel(
         self, channel_id: int, callback_url: str,
         display_name: str | None, avatar_url: str | None,
+        allow_thread_deletion: bool,
     ) -> Registration:
         if self.registry.get(channel_id) is not None:
             raise ChannelTakenError(f"channel {channel_id} is already registered")
@@ -369,6 +375,7 @@ class HubBot(discord.Client):
             display_name=display_name,
             avatar_url=avatar_url,
             webhook_url=webhook.url,
+            allow_thread_deletion=allow_thread_deletion,
         )
         try:
             self.registry.add(reg)

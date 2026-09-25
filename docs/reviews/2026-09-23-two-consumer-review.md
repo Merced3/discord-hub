@@ -1,4 +1,9 @@
-# Two consumers: integration review and handoff
+# Two consumers: integration review and handoff (2026-09-23)
+
+> **This is a dated review record, not the live guide.** For how to build
+> against the hub today, read `docs/integrating.md` and `docs/api.md`.
+> Kept for history: what the consumers asked, what was decided, and what
+> evidence existed at the time.
 
 ## The thesis
 

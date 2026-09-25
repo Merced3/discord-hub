@@ -43,8 +43,8 @@ The hub runs on the local machine and exposes a small HTTP API
 Incoming Discord messages are delivered to the project that registered
 for that channel, via a webhook-style callback.
 
-See `docs/api.md` for the full contract and `docs/architecture.md` for how
-it works inside.
+See `docs/integrating.md` for the consumer guide, `docs/api.md` for the full
+contract, and `docs/architecture.md` for how it works inside.
 
 ## Running it
 
@@ -65,8 +65,8 @@ Requires a `.env` (see `.env.example`). Runtime state lives in `data/`
 
 Text routing, threads, webhook identity, and project-owned slash commands are
 implemented. Two-consumer reliability now has offline regression coverage;
-voice is still planned. See `docs/roadmap.md` and
-`docs/integration-review.md` for scope, evidence, and remaining work.
+voice is still planned. See `docs/roadmap.md` and `docs/reviews/` for scope,
+evidence, and remaining work.
 
 ## Tests (no live Discord required)
 
