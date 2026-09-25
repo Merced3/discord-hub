@@ -58,8 +58,9 @@ existing message (forces the plain bot path — webhooks can't reply).
 Long texts are automatically chunked to fit Discord's limit.
 
 If the channel is registered (below), the message is sent through the
-project's webhook and carries its display name and avatar; the response
-gains a `"via": "webhook"` field.
+channel's registration webhook — identity belongs to the *channel's owner*,
+not the caller (the hub trusts local callers; it does not authenticate who
+sent a given request). The response gains a `"via": "webhook"` field.
 
 ### `POST /registrations`
 Claim a channel for a project. Creates a webhook in the channel for the

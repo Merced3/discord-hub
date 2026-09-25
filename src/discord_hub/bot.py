@@ -159,7 +159,9 @@ class HubBot(discord.Client):
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             raise LookupError(f"Channel {channel_id} is not a text channel")
-        thread = await channel.create_thread(name=name)
+        thread = await channel.create_thread(
+            name=name, type=discord.ChannelType.public_thread
+        )
         return {
             "id": str(thread.id),
             "name": thread.name,
