@@ -37,8 +37,11 @@ next hub task.
   **14 offline tests passed**; Discord operations are mocked, not live-verified.
 - [x] Bounded ordinary callback delivery (five seconds); serialized command and
   registration updates; safer persisted-state writes.
-- [ ] Live two-consumer acceptance run, when explicitly coordinated. Do not
-  confuse the earlier one-consumer live checks with this coverage.
+- [x] Live two-consumer acceptance run — passed with two stand-in consumer
+  backends against live Discord (routing, identity, command collisions,
+  409 hijack refusal, inbound payloads). A run with the *real* Socrates +
+  teaching-agent pair is still worthwhile once both are voice-ready.
+  Found and fixed: API-created threads defaulted to private (now public).
 - [x] Thread deletion scoped by per-registration opt-in flag
   (`allow_thread_deletion`, default false) with per-deletion confirmation
   collected by the consumer (ADR 0004).
