@@ -2,6 +2,8 @@
 
 **One bot. One connection. Every project talks to Discord through this.**
 
+![Architecture: Discord on the left, the hub in the middle, every project on the right](assets/architecture-diagram.png)
+
 ## Why this exists (the thesis)
 
 Several of my projects need to interact with Discord — Socratic Partner
