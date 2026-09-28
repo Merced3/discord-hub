@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <defs>
+    <linearGradient id="bgb" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a2030"/>
+      <stop offset="0.55" stop-color="#141a28"/>
+      <stop offset="1" stop-color="#0e1219"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5865F2" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#8b93ff" stop-opacity="0.8"/>
+      <stop offset="1" stop-color="#5865F2" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="540" fill="url(#bgb)"/>
+  <!-- subtle route network -->
+  <g stroke="url(#line)" stroke-width="3" fill="none">
+    <path d="M0 120 C 240 60, 480 200, 960 100"/>
+    <path d="M0 420 C 300 360, 600 480, 960 380"/>
+    <path d="M0 270 C 320 230, 640 320, 960 250"/>
+  </g>
+  <g fill="#8b93ff" opacity="0.85">
+    <circle cx="150" cy="100" r="6"/>
+    <circle cx="480" cy="150" r="6"/>
+    <circle cx="810" cy="92" r="6"/>
+    <circle cx="220" cy="400" r="6"/>
+    <circle cx="620" cy="440" r="6"/>
+    <circle cx="880" cy="360" r="6"/>
+  </g>
+  <!-- central hub envelope -->
+  <g transform="translate(430,220)">
+    <rect x="0" y="0" width="100" height="66" rx="10" fill="#5865F2"/>
+    <path d="M0 8 L50 44 L100 8" fill="none" stroke="#e9ebff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="480" y="340" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="40" font-weight="600" fill="#dfe2ff" letter-spacing="6">COURIER</text>
+  <text x="480" y="378" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="16" fill="#8b93ff" letter-spacing="2">ONE BOT. EVERY ROUTE.</text>
+</svg>
