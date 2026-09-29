@@ -7,13 +7,13 @@ from dataclasses import asdict
 from typing import Any
 
 import discord
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from .bot import HubBot
 from .commands import CommandNameTakenError, CommandSpec
 from .registry import ChannelTakenError
-from .voice import NotVoiceOwnerError, VoiceBusyError
+from .voice import NotVoiceOwnerError, StreamTakenError, VoiceBusyError
 
 
 class SendMessageRequest(BaseModel):
@@ -205,8 +205,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
     # -- voice (ADR 0005) --------------------------------------------------
 
     def _voice_errors(exc: Exception) -> HTTPException:
-        if isinstance(exc, (VoiceBusyError, NotVoiceOwnerError)):
-            status = 409 if isinstance(exc, VoiceBusyError) else 403
+        if isinstance(exc, (VoiceBusyError, NotVoiceOwnerError, StreamTakenError)):
+            status = 403 if isinstance(exc, NotVoiceOwnerError) else 409
             return HTTPException(status_code=status, detail=str(exc))
         if isinstance(exc, LookupError):
             return HTTPException(status_code=404, detail=str(exc))
@@ -252,9 +252,64 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(status_code=422, detail="empty audio body")
         try:
             await bot.voice.play_pcm(owner, pcm)
-        except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
+        except (VoiceBusyError, NotVoiceOwnerError, LookupError, StreamTakenError) as exc:
             raise _voice_errors(exc) from exc
         return Response(status_code=202)
+
+    @app.websocket("/voice/stream")
+    async def voice_stream(websocket: WebSocket) -> None:
+        """Owner-only duplex stream (ADR 0005, Stage 2).
+
+        Hub -> owner: JSON messages, either
+          {"type": "audio", "user_id": str, "pcm": base64 s16le 48kHz stereo,
+           "timestamp": float}
+          {"type": "speaking", "user_id": str, "state": "started"|"stopped"}
+        Owner -> hub: binary messages of raw PCM s16le 48kHz stereo,
+        played continuously (silence-filled when the buffer is empty).
+        One stream per voice connection; a second attach is refused.
+        """
+        owner = websocket.query_params.get("owner")
+        if not owner:
+            await websocket.close(code=1008, reason="owner query parameter required")
+            return
+        try:
+            stream = await bot.voice.open_stream(owner)
+        except NotVoiceOwnerError:
+            await websocket.close(code=1008, reason="voice connection owned by another project")
+            return
+        except StreamTakenError:
+            await websocket.close(code=1008, reason="a stream is already attached")
+            return
+        except LookupError:
+            await websocket.close(code=1008, reason="no active voice connection")
+            return
+
+        await websocket.accept()
+
+        async def forward_events() -> None:
+            while True:
+                event = await stream.events.get()
+                await websocket.send_json(event)
+
+        async def receive_audio() -> None:
+            while True:
+                message = await websocket.receive()
+                if message.get("type") == "websocket.disconnect":
+                    raise WebSocketDisconnect
+                data = message.get("bytes")
+                if data:
+                    stream.outbound.push(data)
+
+        import asyncio
+
+        forwarder = asyncio.create_task(forward_events())
+        try:
+            await receive_audio()
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            forwarder.cancel()
+            bot.voice.stream_closed(stream)
 
     @app.get("/server/structure")
     async def server_structure() -> dict:

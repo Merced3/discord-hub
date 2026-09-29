@@ -40,7 +40,8 @@ The hub runs on the local machine and exposes a small HTTP API
 
 - `POST /messages` — send a text message to a channel
 - `GET /server/structure` — see the server's channels, roles, and layout
-- Voice join/leave/streaming — planned, not implemented yet
+- Voice: join/leave/play, plus a full-duplex websocket stream
+  (per-speaker audio in, PCM out, speaking events)
 
 Incoming Discord messages are delivered to the project that registered
 for that channel, via a webhook-style callback.
@@ -65,9 +66,9 @@ Requires a `.env` (see `.env.example`). Runtime state lives in `data/`
 
 ## Status
 
-Text routing, threads, webhook identity, and project-owned slash commands are
-implemented. Two-consumer reliability now has offline regression coverage;
-voice is still planned. See `docs/roadmap.md` and `docs/reviews/` for scope,
+Text routing, threads, webhook identity, project-owned slash commands, and
+full-duplex voice (send + receive with speaking events) are implemented and
+live-verified. See `docs/roadmap.md` and `docs/reviews/` for scope,
 evidence, and remaining work.
 
 ## Tests (no live Discord required)

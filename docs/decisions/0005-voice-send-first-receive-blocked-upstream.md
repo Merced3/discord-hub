@@ -1,6 +1,15 @@
 # 0005 — Voice: send + ownership now; receive blocked on upstream
 
-**Status:** accepted (owner chose during two-consumer workstream)
+**Status:** superseded in part — **Stage 2 is implemented and live-verified**
+(2026-09-29). The owner chose to revisit the "no unmerged PR" rule early:
+the hub pins `discord-ext-voice-recv` to the PR #58 branch
+(`porgeeratad/discord-ext-voice-recv@dave-decrypt`), the minimal guarded
+inbound-DAVE patch its author runs 24/7 in production on our exact stack
+(discord.py 2.7.1 + davey 0.1.6). Live verification in the LAB voice
+channel: per-speaker PCM frames and speaking events streamed to a consumer,
+consumer PCM played back — a full-duplex echo ran end-to-end. When a
+voice-recv release ships DAVE support, drop the branch pin (keep the
+dependency otherwise). The rest of this ADR stands as written.
 
 ## Context
 
@@ -36,9 +45,8 @@ status, plus explicit **voice ownership**:
   during live verification), plus Connect/Speak permissions and the `davey`
   + PyNaCl packages.
 
-**Stage 2 (contract below, blocked):** bidirectional streaming and speaking
-events. When the DAVE-decryption PRs land in a voice-recv release, the hub
-gains:
+**Stage 2 (implemented):** bidirectional streaming and speaking
+events, exactly as contracted:
 
 - `WS /voice/stream` (owner only): hub pushes per-speaker PCM frames with
   `{user_id, pcm, timestamp}`; the owner pushes PCM frames back. One

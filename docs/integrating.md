@@ -87,9 +87,16 @@ idempotent and keeps the hub in sync after restarts.
 One voice connection per server, owned by one project at a time. Join with
 your callback URL as `owner` (`POST /voice/join`); you get `409` if another
 project holds it. Play audio by POSTing raw PCM (s16le, 48 kHz, stereo) to
-`/voice/play?owner=...`; leave with `/voice/leave`. Hearing users
-(receive-audio) is a documented contract blocked on an upstream library —
-see ADR 0005; build your pipeline against it, but it isn't live yet.
+`/voice/play?owner=...`; leave with `/voice/leave`.
+
+For conversation (hearing users), attach the duplex stream:
+`WS /voice/stream?owner=...` after joining. You receive per-speaker audio
+frames (`{type: "audio", user_id, pcm (base64), timestamp}`) and speaking
+events (`{type: "speaking", user_id, state}`); you send binary PCM back and
+it plays continuously. One stream per connection. Speaking events are a
+transport signal, not guaranteed utterance boundaries — buffering and
+interruption policy are yours. STT/LLM/TTS are also yours; the hub only
+moves audio.
 
 ## Timeouts and timestamps
 

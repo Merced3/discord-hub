@@ -7,6 +7,9 @@ dependencies = [
     "automation-harness",
     "davey>=0.1.4",
     "discord.py>=2.7",
+    # Voice receive with inbound DAVE decryption. Pinned to PR #58 branch
+    # until a voice-recv release ships DAVE support (ADR 0005).
+    "discord-ext-voice-recv @ git+https://github.com/porgeeratad/discord-ext-voice-recv@dave-decrypt",
     "fastapi>=0.115",
     "pynacl>=1.5",
     "uvicorn>=0.30",

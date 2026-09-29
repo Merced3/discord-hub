@@ -55,17 +55,20 @@ next hub task.
   audio through Discord's E2EE (DAVE) stack. 13 offline ownership tests.
   Required the `voice_states` gateway intent (declared in code; not a
   privileged intent, no portal toggle needed).
-- [ ] Voice receive/streaming + speaking events — contract documented in
-  ADR 0005; blocked on upstream DAVE-decryption support in voice-recv
-  (open PRs #54/#58). STT/LLM/TTS remain consumer responsibilities.
+- [x] **Voice receive/streaming + speaking events** (ADR 0005, Stage 2) —
+  `WS /voice/stream` owner-only duplex: per-speaker PCM frames and
+  started/stopped speaking events to the owner, continuous PCM playback
+  back. Uses voice-recv pinned to the PR #58 branch until an upstream
+  release ships DAVE decryption. **Live-verified 2026-09-29**: full-duplex
+  echo in the LAB voice channel. 11 new offline tests. STT/LLM/TTS remain
+  consumer responsibilities.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
 
 ## Backlog (full picture, with expectations)
 
-1. **Voice receive/streaming + speaking events** — 🔒 blocked on upstream
-   (ADR 0005). The hearing half of full duplex. Contract documented; expect
-   a few days of careful work plus real-world tuning once unblocked.
-   Biggest remaining technical risk in the project.
+1. **Voice receive/streaming + speaking events** — ✅ done (Stage 2,
+   ADR 0005). Follow-up: drop the PR-branch pin once a voice-recv release
+   ships DAVE decryption.
 2. **Live two-consumer acceptance run** — real simultaneous registrations,
    identities, command collisions, one callback down. Offline tests cover the
    logic; this proves it against live Discord. Expect one session, mostly

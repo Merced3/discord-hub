@@ -291,14 +291,29 @@ channel, **`409` another project owns the connection**.
 Body is **raw PCM audio: s16le, 48 kHz, stereo** (`application/octet-stream`).
 `202` accepted. Replaces anything currently playing (use `/voice/stop` to
 interrupt explicitly). No file paths — the hub never reads a consumer's disk.
+Refused with `409` while a duplex stream is attached (send through the
+stream instead).
 
-## Planned (not yet implemented)
+### `WS /voice/stream?owner=...`
+The duplex stream (ADR 0005, Stage 2). Owner-only; one stream per voice
+connection — a second attach is closed with code `1008`. Requires an active
+owned voice connection (`/voice/join` first). The stream closes when the
+websocket drops; `/voice/leave` also closes it.
 
-### `WS /voice/stream`
-Bidirectional per-speaker PCM plus speaking events
-(`{type: "speaking", user_id, state}`). Blocked until a voice-recv release
-ships DAVE decryption (ADR 0005); the contract is stable enough for
-consumers to build against.
+**Hub → owner** (JSON text messages):
+- Audio, one message per 20 ms frame per speaker:
+  `{ "type": "audio", "user_id": "123", "pcm": "<base64 s16le 48kHz stereo>",
+  "timestamp": 1759100000.123 }`
+- Speaking activity (a transport signal, not a guaranteed utterance
+  boundary — consumers decide interruption policy):
+  `{ "type": "speaking", "user_id": "123", "state": "started" | "stopped" }`
+
+**Owner → hub**: binary messages of raw PCM (s16le, 48 kHz, stereo).
+Played continuously; the buffer is silence-filled when empty so playback
+never terminates mid-conversation. Frames are 3840 bytes (20 ms); trailing
+partial frames are dropped.
+
+Live-verified 2026-09-29 (full-duplex echo in the LAB voice channel).
 
 ## Versioning rule
 
