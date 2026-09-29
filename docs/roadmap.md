@@ -62,6 +62,10 @@ next hub task.
   release ships DAVE decryption. **Live-verified 2026-09-29**: full-duplex
   echo in the LAB voice channel. 11 new offline tests. STT/LLM/TTS remain
   consumer responsibilities.
+- [x] **Voice-state events** — registrations opt in with `voice_events: true`
+  and receive guild-wide join/leave/move events at their callback URL.
+  Lets projects trigger sessions when a user joins a voice channel without
+  the hub learning any session policy. Live-verified. 7 offline tests.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
 
 ## Backlog (full picture, with expectations)

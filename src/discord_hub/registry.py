@@ -27,6 +27,12 @@ class Registration:
     # Default False; consumers opt in and still confirm each deletion with
     # the owner (ADR 0004).
     allow_thread_deletion: bool = False
+    # Declared intent: this project wants voice-state events (user joined /
+    # left / moved voice channels, guild-wide) POSTed to its callback URL.
+    # Default False; consumers opt in. Used for triggers like "start a
+    # session when the owner joins a voice channel" — the policy stays in
+    # the project, the hub only routes.
+    voice_events: bool = False
 
 
 class ChannelTakenError(RuntimeError):

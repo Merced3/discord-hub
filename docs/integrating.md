@@ -95,8 +95,13 @@ frames (`{type: "audio", user_id, pcm (base64), timestamp}`) and speaking
 events (`{type: "speaking", user_id, state}`); you send binary PCM back and
 it plays continuously. One stream per connection. Speaking events are a
 transport signal, not guaranteed utterance boundaries — buffering and
-interruption policy are yours. STT/LLM/TTS are also yours; the hub only
-moves audio.
+interruption policy are yours. STT/LLM/TTS (including *whose* voice your
+project speaks with) are also yours; the hub only moves audio.
+
+Want to start a session when a user joins a voice channel? Register any
+of your channels with `"voice_events": true` and the hub POSTs guild-wide
+join/leave/move events to your callback. The trigger policy (which user,
+which channel, what to do) is yours.
 
 ## Timeouts and timestamps
 

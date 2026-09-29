@@ -315,6 +315,27 @@ partial frames are dropped.
 
 Live-verified 2026-09-29 (full-duplex echo in the LAB voice channel).
 
+### Voice-state events (registration opt-in)
+Add `"voice_events": true` to a channel registration and the hub POSTs
+guild-wide voice join/leave/move events to that project's callback URL
+(once per project, not per registered channel):
+
+```json
+{
+  "type": "voice_state",
+  "user": {"id": "123", "name": "cedgo"},
+  "before_channel_id": null,
+  "after_channel_id": "456"
+}
+```
+
+`before_channel_id = null` is a join, `after_channel_id = null` is a
+leave, both set is a move. Mute/deafen toggles and bot users are not
+reported. What a join *means* (start a session, page the owner) is the
+project's policy — the hub only routes. Intended use: a project starts
+its voice session when its owner joins a voice channel, entirely from
+the project side.
+
 ## Versioning rule
 
 Additive changes (new endpoints, new optional fields) are always fine.

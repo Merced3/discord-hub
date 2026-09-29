@@ -110,6 +110,48 @@ class HubBot(discord.Client):
         except (aiohttp.ClientError, TimeoutError):
             logger.warning("message callback failed for channel %s; not retried", message.channel.id)
 
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        """Route voice join/leave/move events to registered projects that
+        opted in (`voice_events` on their registration). The hub only
+        routes; what a join *means* (start a session, ignore it, page the
+        owner) is the project's policy. Bot users are not reported, same
+        rule as message callbacks."""
+        if member.bot:
+            return
+        before_id = before.channel.id if before.channel else None
+        after_id = after.channel.id if after.channel else None
+        if before_id == after_id:
+            return  # mute/deafen/video toggles are not join/leave/move
+        payload: dict[str, Any] = {
+            "type": "voice_state",
+            "user": {"id": str(member.id), "name": member.display_name},
+            "before_channel_id": str(before_id) if before_id else None,
+            "after_channel_id": str(after_id) if after_id else None,
+        }
+        # Deliver once per project even if it registered several channels.
+        callback_urls = {
+            reg.callback_url for reg in self.registry.all() if reg.voice_events
+        }
+        for callback_url in callback_urls:
+            try:
+                async with self._http.post(
+                    callback_url, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                    allow_redirects=False,
+                ) as resp:
+                    if not 200 <= resp.status < 300:
+                        logger.warning(
+                            "voice-state delivery to %s failed: HTTP %s",
+                            callback_url, resp.status,
+                        )
+            except (aiohttp.ClientError, TimeoutError):
+                logger.warning("voice-state callback failed for %s; not retried", callback_url)
+
     # -- outbound: project -> Discord ------------------------------------
 
     async def send_message(
@@ -369,16 +411,18 @@ class HubBot(discord.Client):
         display_name: str | None = None,
         avatar_url: str | None = None,
         allow_thread_deletion: bool = False,
+        voice_events: bool = False,
     ) -> Registration:
         async with self._registrations_lock:
             return await self._register_channel(
-                channel_id, callback_url, display_name, avatar_url, allow_thread_deletion
+                channel_id, callback_url, display_name, avatar_url,
+                allow_thread_deletion, voice_events,
             )
 
     async def _register_channel(
         self, channel_id: int, callback_url: str,
         display_name: str | None, avatar_url: str | None,
-        allow_thread_deletion: bool,
+        allow_thread_deletion: bool, voice_events: bool = False,
     ) -> Registration:
         if self.registry.get(channel_id) is not None:
             raise ChannelTakenError(f"channel {channel_id} is already registered")
@@ -393,6 +437,7 @@ class HubBot(discord.Client):
             avatar_url=avatar_url,
             webhook_url=webhook.url,
             allow_thread_deletion=allow_thread_deletion,
+            voice_events=voice_events,
         )
         try:
             self.registry.add(reg)
