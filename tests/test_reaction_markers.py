@@ -115,6 +115,14 @@ class ReactionMarkerTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.on_raw_reaction_add(make_event("🔄"))
         self.assertEqual(sorted(path for path, _ in self.received), ["/a", "/b"])
 
+    async def test_variation_selector_in_event_still_matches(self):
+        # Discord sends some emojis with U+FE0F (e.g. '\u2764\ufe0f'); config
+        # authors write the bare emoji. Matching must normalize it away.
+        self.bot.settings.reaction_markers["\u2764"] = "love"
+        self.register(10, self.url_a, reaction_events=True)
+        await self.bot.on_raw_reaction_add(make_event("\u2764\ufe0f"))
+        self.assertEqual(self.received[0][1]["marker"], "love")
+
     async def test_flag_persists_across_registry_reload(self):
         self.register(10, self.url_a, reaction_events=True)
         reloaded = Registry(self.registry._path)

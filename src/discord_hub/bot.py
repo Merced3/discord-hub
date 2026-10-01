@@ -167,8 +167,16 @@ class HubBot(discord.Client):
         message in the server regardless of cache age, so marks work on
         years-old messages. The emoji -> marker mapping is hub config; what
         a marker means and whose reaction counts is the project's policy."""
-        marker = self.settings.reaction_markers.get(str(event.emoji))
+        # Normalize U+FE0F variation selectors out of both sides: Discord
+        # sends some emojis with it (\u2764\ufe0f) and config authors won't.
+        emoji = str(event.emoji).replace("\ufe0f", "")
+        marker = next(
+            (name for key, name in self.settings.reaction_markers.items()
+             if key.replace("\ufe0f", "") == emoji),
+            None,
+        )
         if marker is None:
+            logger.debug("reaction %s %r: not a configured marker", action, str(event.emoji))
             return
         if event.guild_id != self.settings.discord_guild_id:
             return
@@ -187,6 +195,7 @@ class HubBot(discord.Client):
         callback_urls = {
             reg.callback_url for reg in self.registry.all() if reg.reaction_events
         }
+        logger.info("reaction marker %s %r (%s) -> %d project(s)", action, str(event.emoji), marker, len(callback_urls))
         for callback_url in callback_urls:
             try:
                 async with self._http.post(
