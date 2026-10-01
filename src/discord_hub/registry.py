@@ -33,6 +33,11 @@ class Registration:
     # session when the owner joins a voice channel" — the policy stays in
     # the project, the hub only routes.
     voice_events: bool = False
+    # Declared intent: this project wants reaction-marker events (a configured
+    # emoji added to / removed from any message in the server) POSTed to its
+    # callback URL. Default False; consumers opt in. The emoji -> marker
+    # mapping is hub config; what a marker *means* is the project's policy.
+    reaction_events: bool = False
 
 
 class ChannelTakenError(RuntimeError):

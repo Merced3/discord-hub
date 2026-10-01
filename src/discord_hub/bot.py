@@ -40,6 +40,7 @@ class HubBot(discord.Client):
         intents.messages = True
         intents.message_content = True
         intents.voice_states = True  # required for voice handshake (session id)
+        intents.reactions = True  # reaction markers (raw add/remove events)
         super().__init__(intents=intents)
         self.settings = settings
         self.registry = registry
@@ -151,6 +152,55 @@ class HubBot(discord.Client):
                         )
             except (aiohttp.ClientError, TimeoutError):
                 logger.warning("voice-state callback failed for %s; not retried", callback_url)
+
+    async def on_raw_reaction_add(self, event: discord.RawReactionActionEvent) -> None:
+        await self._route_reaction_marker(event, "added")
+
+    async def on_raw_reaction_remove(self, event: discord.RawReactionActionEvent) -> None:
+        await self._route_reaction_marker(event, "removed")
+
+    async def _route_reaction_marker(
+        self, event: discord.RawReactionActionEvent, action: str
+    ) -> None:
+        """Route configured-emoji reactions to projects that opted in
+        (`reaction_events` on their registration). Raw events fire for any
+        message in the server regardless of cache age, so marks work on
+        years-old messages. The emoji -> marker mapping is hub config; what
+        a marker means and whose reaction counts is the project's policy."""
+        marker = self.settings.reaction_markers.get(str(event.emoji))
+        if marker is None:
+            return
+        if event.guild_id != self.settings.discord_guild_id:
+            return
+        if self.user is not None and event.user_id == self.user.id:
+            return  # the hub's own reactions are not marks
+        payload: dict[str, Any] = {
+            "type": "reaction_marker",
+            "action": action,
+            "emoji": str(event.emoji),
+            "marker": marker,
+            "message_id": str(event.message_id),
+            "channel_id": str(event.channel_id),
+            "user_id": str(event.user_id),
+        }
+        # Deliver once per project even if it registered several channels.
+        callback_urls = {
+            reg.callback_url for reg in self.registry.all() if reg.reaction_events
+        }
+        for callback_url in callback_urls:
+            try:
+                async with self._http.post(
+                    callback_url, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                    allow_redirects=False,
+                ) as resp:
+                    if not 200 <= resp.status < 300:
+                        logger.warning(
+                            "reaction-marker delivery to %s failed: HTTP %s",
+                            callback_url, resp.status,
+                        )
+            except (aiohttp.ClientError, TimeoutError):
+                logger.warning("reaction-marker callback failed for %s; not retried", callback_url)
 
     # -- outbound: project -> Discord ------------------------------------
 
@@ -412,17 +462,19 @@ class HubBot(discord.Client):
         avatar_url: str | None = None,
         allow_thread_deletion: bool = False,
         voice_events: bool = False,
+        reaction_events: bool = False,
     ) -> Registration:
         async with self._registrations_lock:
             return await self._register_channel(
                 channel_id, callback_url, display_name, avatar_url,
-                allow_thread_deletion, voice_events,
+                allow_thread_deletion, voice_events, reaction_events,
             )
 
     async def _register_channel(
         self, channel_id: int, callback_url: str,
         display_name: str | None, avatar_url: str | None,
         allow_thread_deletion: bool, voice_events: bool = False,
+        reaction_events: bool = False,
     ) -> Registration:
         if self.registry.get(channel_id) is not None:
             raise ChannelTakenError(f"channel {channel_id} is already registered")
@@ -438,6 +490,7 @@ class HubBot(discord.Client):
             webhook_url=webhook.url,
             allow_thread_deletion=allow_thread_deletion,
             voice_events=voice_events,
+            reaction_events=reaction_events,
         )
         try:
             self.registry.add(reg)

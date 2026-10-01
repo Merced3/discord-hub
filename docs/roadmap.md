@@ -61,11 +61,20 @@ next hub task.
   back. Uses voice-recv pinned to the PR #58 branch until an upstream
   release ships DAVE decryption. **Live-verified 2026-09-29**: full-duplex
   echo in the LAB voice channel. 11 new offline tests. STT/LLM/TTS remain
-  consumer responsibilities.
+  consumer responsibilities. Receive-path hardening (RTP padding strip,
+  drop-frame guard, non-audio guard) landed hub-side 2026-10-02 (ADR 0006)
+  after Discord began padding voice payloads; pending live re-verification.
 - [x] **Voice-state events** — registrations opt in with `voice_events: true`
   and receive guild-wide join/leave/move events at their callback URL.
   Lets projects trigger sessions when a user joins a voice channel without
   the hub learning any session policy. Live-verified. 7 offline tests.
+- [x] **Reaction markers** — a general "reaction → action" signal. Hub
+  config maps emojis to marker names (`REACTION_MARKERS`); registrations
+  opt in with `reaction_events: true` and receive `reaction_marker`
+  callbacks (`added`/`removed`) for those emojis on any message in the
+  server, old messages included (raw gateway events). Removing the
+  reaction undoes the mark. What a marker means is the project's policy.
+  8 offline tests. Not yet live-verified.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
 
 ## Backlog (full picture, with expectations)

@@ -78,7 +78,9 @@ project's identity (ADR 0002). Registration persists across hub restarts.
 ```
 `display_name` and `avatar_url` are optional. `allow_thread_deletion`
 (default `false`) opts the channel's threads into `DELETE /threads/{id}`;
-deregistering revokes it.
+deregistering revokes it. Event opt-ins: `"voice_events": true` (voice
+join/leave/move) and `"reaction_events": true` (reaction markers) — see
+their sections below.
 
 **Response `201`** — the registration, including the created `webhook_url`.
 
@@ -335,6 +337,33 @@ reported. What a join *means* (start a session, page the owner) is the
 project's policy — the hub only routes. Intended use: a project starts
 its voice session when its owner joins a voice channel, entirely from
 the project side.
+
+### Reaction markers (registration opt-in)
+A general "reaction -> action" signal. The hub config maps emojis to
+marker names (`REACTION_MARKERS` env var, JSON object — see
+`.env.example`); add `"reaction_events": true` to a channel registration
+and the hub POSTs to that project's callback URL (once per project)
+whenever a configured emoji is added to or removed from **any message in
+the server**, including messages years old (raw gateway events, no cache
+needed):
+
+```json
+{
+  "type": "reaction_marker",
+  "action": "added",
+  "emoji": "🔄",
+  "marker": "belief_change",
+  "message_id": "456",
+  "channel_id": "123",
+  "user_id": "789"
+}
+```
+
+`action` is `"added"` or `"removed"` — removing the reaction undoes the
+mark. The hub's own reactions are never reported. Whose reaction counts
+and what a marker *means* is the project's policy; the hub only routes.
+The message content is not included — fetch it via
+`GET /channels/{id}/history` if needed.
 
 ## Versioning rule
 

@@ -16,3 +16,8 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     # Not used yet; kept here so .env can hold it for future features.
     discord_application_id: int | None = None
+    # Reaction markers: emoji -> marker name, as a JSON object in the env var
+    # (REACTION_MARKERS='{"🔄": "belief_change", "🔒": "private"}').
+    # Registrations opt in with reaction_events: true and receive a callback
+    # whenever a configured emoji is added to / removed from any message.
+    reaction_markers: dict[str, str] = {}

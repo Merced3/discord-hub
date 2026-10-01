@@ -21,6 +21,12 @@ from dataclasses import dataclass
 import discord
 from discord.ext import voice_recv
 
+from .voice_recv_compat import apply_voice_recv_patches
+
+# Harden the pinned fork's receive path before any listener can be created
+# (patches bind when PacketDecryptor/AudioReader are constructed).
+apply_voice_recv_patches()
+
 logger = logging.getLogger(__name__)
 
 _PCM_FRAME_BYTES = 3840  # 20 ms of s16le 48 kHz stereo

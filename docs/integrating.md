@@ -103,6 +103,13 @@ of your channels with `"voice_events": true` and the hub POSTs guild-wide
 join/leave/move events to your callback. The trigger policy (which user,
 which channel, what to do) is yours.
 
+Want to turn reactions into actions (e.g. "🔄 = this changed my mind")?
+Ask the hub operator to add the emoji to `REACTION_MARKERS`, register
+with `"reaction_events": true`, and you'll get a `reaction_marker`
+callback (`added`/`removed`) for that emoji on any message in the server,
+old ones included. The mark, its meaning, and whose reactions count are
+yours; the hub just tells you it happened.
+
 ## Timeouts and timestamps
 
 - Discord renders `<t:UNIX_TIMESTAMP:R>` as "in 3 hours" natively. No
