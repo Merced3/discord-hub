@@ -95,7 +95,12 @@ next hub task.
    **hub API key** worth adding (localhost trust model breaks remotely).
    Small-medium ops session.
 5. **Hub-owned message deletion** — tiny; only if a consumer asks again.
-6. **"Project is offline" auto-reply** — when a command callback is
+6. **File attachments in outbound messages** — evaluated 2026-10-05 and
+   deferred under PRINCIPLES #3 (one convenience-grade need, no second
+   need; links already cover the use case). See
+   `docs/reviews/2026-10-05-file-attachments-review.md` for the evidence
+   and a provisional design sketch. Reopen on a second real need.
+7. **"Project is offline" auto-reply** — when a command callback is
    unreachable, answer the user with something honest instead of a bare
    auto-defer. Small quality-of-life item.
 
