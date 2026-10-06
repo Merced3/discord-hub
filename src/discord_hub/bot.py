@@ -23,9 +23,166 @@ _CALLBACK_BUDGET_S = 2.5  # Discord allows 3s for the initial response
 _MESSAGE_CALLBACK_BUDGET_S = 5.0  # acknowledge promptly; do work in the consumer
 
 
+class _MdState:
+    """Markdown state at a given position in the original text."""
+
+    __slots__ = ("in_fence", "fence_lang", "inline_stack")
+
+    def __init__(self) -> None:
+        self.in_fence = False
+        self.fence_lang = ""
+        self.inline_stack: list[str] = []  # open inline markers, in order
+
+
+def _scan_state(text: str) -> _MdState:
+    """Walk text and return the markdown state at the end of it.
+
+    Handles backslash escapes. Fences are line-oriented (``` toggles),
+    everything else is a simple toggle stack (** before *, so bold wins).
+    """
+    state = _MdState()
+    i, n = 0, len(text)
+    at_line_start = True
+    while i < n:
+        ch = text[i]
+        if ch == "\\":  # escaped char: skip both
+            i += 2
+            at_line_start = False
+            continue
+        if at_line_start and text.startswith("```", i):
+            if not state.in_fence:
+                eol = text.find("\n", i)
+                eol = n if eol == -1 else eol
+                state.in_fence = True
+                state.fence_lang = text[i + 3 : eol].strip()
+                state.inline_stack.clear()  # nothing inline inside a fence
+                i = eol
+                continue
+            state.in_fence = False
+            state.fence_lang = ""
+            i += 3
+            at_line_start = False
+            continue
+        if ch == "\n":
+            at_line_start = True
+            i += 1
+            continue
+        at_line_start = False
+        if state.in_fence:
+            i += 1
+            continue
+        for marker in ("**", "~~", "||", "*", "`", "_"):
+            if text.startswith(marker, i):
+                if state.inline_stack and state.inline_stack[-1] == marker:
+                    state.inline_stack.pop()
+                else:
+                    state.inline_stack.append(marker)
+                i += len(marker)
+                break
+        else:
+            i += 1
+    return state
+
+
+def _wrappers(state: _MdState) -> tuple[str, str]:
+    """(suffix to close a chunk, prefix to reopen the next) for a state."""
+    suffix = "".join(reversed(state.inline_stack))
+    prefix = "".join(state.inline_stack)
+    if state.in_fence:
+        suffix += "\n```"
+        prefix = "```" + state.fence_lang + "\n" + prefix
+    return suffix, prefix
+
+
+def _find_break(window: str, min_len: int = 1) -> int:
+    """Best split index within window. 0 means 'no good break found'.
+
+    Breaks yielding a piece shorter than min_len are rejected, so we don't
+    emit tiny chunks (e.g. a lone ``` fence opener) when a later separator
+    or a hard cut would fill the message better.
+    """
+    for sep in ("\n\n", "\n", " "):
+        idx = window.rfind(sep, 1)  # don't break at 0
+        keep = len(sep) if sep != " " else 1  # separator stays with prev chunk
+        if idx > 0 and idx + keep >= min_len:
+            return idx + keep
+    return 0
+
+
 def _chunks(text: str, limit: int = _MESSAGE_LIMIT) -> list[str]:
+    """Split text into Discord-safe messages, losslessly.
+
+    Break preference: paragraph > line > space > hard cut, so words and list
+    items are never severed when avoidable. Code fences and inline markdown
+    (**, *, `, ~~, ||, _) that span a break are closed at the end of one
+    chunk and reopened at the start of the next. Concatenating the chunks
+    minus those synthetic wrappers reproduces the input exactly.
+    """
+    return [chunk for chunk, _, _ in _chunks_with_meta(text, limit)]
+
+
+def _chunks_with_meta(
+    text: str, limit: int = _MESSAGE_LIMIT
+) -> list[tuple[str, str, str]]:
+    """Like _chunks, but each item is (chunk, added_prefix, added_suffix).
+
+    The prefix/suffix are the synthetic reopeners/closers, so tests can
+    verify losslessness exactly: strip them, join, compare to the input.
+    """
     content = text.strip() or "(No text response.)"
-    return [content[i : i + limit] for i in range(0, len(content), limit)]
+    out: list[tuple[str, str, str]] = []
+    pos = 0
+    pending_prefix = ""
+    while pos < len(content):
+        remaining = content[pos:]
+        take = min(max(limit - len(pending_prefix), 1), len(remaining))
+
+        while True:
+            window = remaining[:take]
+            min_len = max(len(window) // 4, 1)
+            piece = window
+            if len(remaining) > take:
+                brk = _find_break(window, min_len)
+                if brk > 0:
+                    piece = remaining[:brk]
+
+            state_start = _scan_state(content[:pos])
+            state_end = _scan_state(content[: pos + len(piece)])
+
+            # Prefer not to open a fence at the very end of a chunk — but only
+            # when breaking before the fence still gives a decent-sized piece.
+            # Otherwise the close/reopen wrappers handle it fine.
+            if state_end.in_fence and not state_start.in_fence:
+                cut = piece.rfind("\n```")
+                if cut >= min_len:
+                    piece = piece[:cut]
+                    state_end = _scan_state(content[: pos + len(piece)])
+
+            if not piece:  # safety net: never emit an empty message
+                piece = remaining[:1]
+                state_end = _scan_state(content[: pos + len(piece)])
+
+            suffix, next_prefix = _wrappers(state_end)
+
+            if len(pending_prefix) + len(piece) + len(suffix) <= limit:
+                break  # fits — done
+            if len(piece) <= 1:
+                # pathological limit (wrappers alone exceed it): emit raw
+                # text with no wrappers at all, but always PROGRESS
+                piece = remaining[:1]
+                suffix = next_prefix = ""
+                pending_prefix = ""
+                break
+            # shrink and re-evaluate (break choice + state may both change);
+            # clamp to >= 1: a negative slice would wrap and never converge
+            take = max(
+                len(piece) - (len(pending_prefix) + len(piece) + len(suffix) - limit), 1
+            )
+
+        out.append((pending_prefix + piece + suffix, pending_prefix, suffix))
+        pending_prefix = next_prefix
+        pos += len(piece)  # piece is always non-empty — no infinite loop
+    return out
 
 
 class HubBot(discord.Client):

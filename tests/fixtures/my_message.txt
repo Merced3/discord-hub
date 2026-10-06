@@ -1,0 +1,45 @@
+Yes — here are a few well-known lines of research you can look at first, with the core claim each one is often used to support:
+
+1. **Guided instruction vs. minimal guidance**
+   - **Kirschner, Sweller, & Clark (2006)**: argues novices learn better with explicit guidance than with discovery/self-directed exploration.
+   - Useful for your question because it’s one of the clearest sources behind “free-form self-education is weaker.”
+
+2. **Worked examples and cognitive load**
+   - **Sweller (1988)** and later cognitive load research.
+   - Finds that learners, especially beginners, often do better when examples are broken down for them instead of being forced to search and infer everything alone.
+
+3. **Testing effect / retrieval practice**
+   - **Roediger & Karpicke (2006)**.
+   - Shows that active recall beats rereading or passively consuming information.
+   - Relevant because if an LLM helps you quiz yourself, it may support learning rather than replace it.
+
+4. **Spacing effect**
+   - **Cepeda et al. (2006)**.
+   - Learning spread across time is better than cramming.
+   - Useful for thinking about how an LLM-based system should schedule review.
+
+5. **Desirable difficulties**
+   - **Bjork & Bjork** and related work.
+   - Learning is often improved by effortful processing, but only when the effort is the right kind.
+   - Important for your “don’t let AI do the thinking for me” concern.
+
+6. **Self-regulated learning**
+   - **Zimmerman (2002)** and others.
+   - Focuses on how learners plan, monitor, and adjust their own learning.
+   - This is probably the closest literature to your goal of building a self-education system.
+
+7. **Media multitasking / screen distraction**
+   - Work by **Sana, Weston, & Cepeda (2013)** and related studies.
+   - Shows that digital environments can hurt learning through distraction and divided attention.
+   - This is often what people loosely mean when they say “screen time is bad.”
+
+A useful distinction:
+- The literature usually does **not** say “self-education is bad.”
+- It more often says **unstructured, unguided, or distraction-heavy learning is weaker**, especially for novices.
+
+Your AI question is really:
+- Does an LLM act like a **distraction**, a **replacement for thinking**, or a **guided tutor / retrieval practice tool**?
+
+If you want, I can next give you:
+- a **short reading list with links/titles**, or
+- a **map of which claims these studies actually support vs. don’t support**.
