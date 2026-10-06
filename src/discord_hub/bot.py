@@ -206,6 +206,12 @@ class HubBot(discord.Client):
         self.ready_event: asyncio.Event  # assigned in main before startup
         self._http: aiohttp.ClientSession  # created in setup_hook
         self._interactions: dict[str, tuple[discord.Interaction, float]] = {}
+        self.interaction_stats: dict[str, int] = {
+            "received": 0,
+            "delivered": 0,
+            "callback_failed": 0,
+            "unrouted": 0,
+        }
         self._commands_lock = asyncio.Lock()
         self._registrations_lock = asyncio.Lock()
         self.voice = VoiceManager(settings.discord_guild_id)
@@ -542,8 +548,18 @@ class HubBot(discord.Client):
         HTTP response IS the interaction response (ADR 0003)."""
         interaction_id = str(interaction.id)
         self._interactions[interaction_id] = (interaction, time.monotonic())
+        self.interaction_stats["received"] += 1
         callback_url = self.command_store.owner_of(spec.name)
+        logger.info(
+            "interaction %s received: /%s by %s in channel %s -> %s",
+            interaction_id,
+            spec.name,
+            interaction.user.display_name,
+            interaction.channel_id,
+            callback_url or "UNROUTED",
+        )
         if callback_url is None:
+            self.interaction_stats["unrouted"] += 1
             await interaction.response.send_message(
                 "This command is not currently routed.", ephemeral=True
             )
@@ -556,16 +572,35 @@ class HubBot(discord.Client):
             "channel_id": str(interaction.channel_id),
             "user": {"id": str(interaction.user.id), "name": interaction.user.display_name},
         }
+        started = time.monotonic()
         try:
             async with self._http.post(
                 callback_url,
                 json=event,
                 timeout=aiohttp.ClientTimeout(total=_CALLBACK_BUDGET_S),
             ) as resp:
+                status = resp.status
                 body = await resp.json(content_type=None)
         except (TimeoutError, aiohttp.ClientError):
-            logger.exception("command callback to %s failed; auto-deferring", callback_url)
+            self.interaction_stats["callback_failed"] += 1
+            logger.exception(
+                "interaction %s (/%s) callback to %s failed; auto-deferring",
+                interaction_id,
+                spec.name,
+                callback_url,
+            )
             body = {"defer": True}
+        else:
+            self.interaction_stats["delivered"] += 1
+            logger.info(
+                "interaction %s (/%s) callback %s -> HTTP %s in %dms (defer=%s)",
+                interaction_id,
+                spec.name,
+                callback_url,
+                status,
+                round((time.monotonic() - started) * 1000),
+                body.get("defer", False),
+            )
 
         try:
             if body.get("defer"):

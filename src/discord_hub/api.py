@@ -80,6 +80,7 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             "status": "ok",
             "discord_connected": bot.is_ready(),
             "uptime_seconds": int(time.time() - started_at),
+            "interactions": bot.interaction_stats,
         }
 
     @app.post("/messages", status_code=201)
