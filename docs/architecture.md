@@ -56,6 +56,27 @@ both want the same channel, that's a configuration decision the owner
 makes explicitly — the hub will refuse ambiguous registrations rather than
 pick a winner.
 
+## Tier-scaled limits: check the table, never hardcode
+
+Some Discord limits scale with the server's boost tier (upload size,
+today; others as Discord adds them). The hub's rule (ADR 0008): limits
+live in **one table** — `capabilities.py`'s `TIER_LIMITS`, keyed by limit
+*name* — and a feature calls `bot.tier_limit("name")` **at the moment it
+needs to enforce the limit**. The tier is read live from
+`guild.premium_tier`, never cached, so a boost (or an expired one) takes
+effect on the next request with no restart and no per-feature code.
+
+Consequences of the pattern:
+
+- Features know limit *names* (`"attachment_bytes"`), never tier
+  arithmetic. What "tier 2" means for uploads exists only in the table.
+- Unlisted tiers inherit the tier-0 base, and an unknown guild (bot not
+  ready) is treated as tier 0 — limits only ever rise intentionally.
+- Adding a limit is one table entry plus one call site. If a limit does
+  **not** scale with tier (bot message length is 2000 chars on every
+  tier), it stays an ordinary constant elsewhere, with a comment saying
+  why — the table is an honest record of what Discord actually scales.
+
 ## Runtime lifecycle
 
 Long-running concerns — single-instance lock, graceful shutdown on

@@ -39,6 +39,8 @@ Discord code — they talk to this hub over a local HTTP API.
 
 - `src/discord_hub/bot.py` — the discord.py bot (the connection itself)
 - `src/discord_hub/api.py` — the FastAPI app other projects call
+- `src/discord_hub/capabilities.py` — tier-scaled limit table (ADR 0008);
+  features check limits via `bot.tier_limit(name)`, never hardcode them
 - `src/discord_hub/config.py` — settings from environment
 - `src/discord_hub/main.py` — wires bot + API together, entry point
 - `scripts/check_permissions.py` — reports granted/missing bot permissions
