@@ -62,6 +62,27 @@ channel's registration webhook — identity belongs to the *channel's owner*,
 not the caller (the hub trusts local callers; it does not authenticate who
 sent a given request). The response gains a `"via": "webhook"` field.
 
+### `POST /messages/attachments?channel_id=123&filename=report.json&text=optional`
+Attach one file to a message (ADR 0007). The request **body is the raw
+file bytes** (`application/octet-stream`); the hub never reads a
+consumer's disk. `filename` is what Discord displays. `text` is optional
+message content. One file per request; send several requests for several
+files. Content-agnostic by design — charts, logs, JSON, anything.
+
+**Size cap: 10 MiB total body, enforced before Discord is touched.**
+Larger files get an immediate `413` with a "too big" detail and the
+rejection is logged hub-side. For bigger files, post a link instead —
+URLs in `POST /messages` text render inline.
+
+**Response `201`** — same as `POST /messages`: `{ "id": "456",
+"channel_id": "123", "via": "webhook" | "bot" }`. Registered channels
+keep their webhook identity (webhooks support file uploads); unregistered
+channels use the plain bot path. No `reply_to_message_id` on this
+endpoint.
+
+Errors: `413` too big, `422` missing `channel_id`/`filename` or empty
+body, `404` unknown or not a text channel, `403` bot lacks permission.
+
 ### `POST /registrations`
 Claim a channel for a project. Creates a webhook in the channel for the
 project's identity (ADR 0002). Registration persists across hub restarts.

@@ -53,6 +53,12 @@ Reopen when a *second* real project needs to attach a file, or when a
 tapping a Tailscale link demonstrably fails). Record the new need here
 or in a fresh review and reassess.
 
+> **Update (2026-10-05, later):** a second real need arrived — the
+> trading engine needs to send photos/logs/JSON, agnostically. Gate
+> passed; built as ADR 0007 (`POST /messages/attachments`, raw bytes,
+> 10 MiB cap with immediate 413). Live verification pending: 🧪 LAB
+> (#lab-text) first, real channels only after.
+
 ## Design sketch (for the future session, not built)
 
 Captured so the thinking isn't lost; all of it is provisional until a

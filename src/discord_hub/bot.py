@@ -418,6 +418,42 @@ class HubBot(discord.Client):
             await channel.send(chunk)
         return {"id": str(first.id), "channel_id": str(channel.id), "via": "bot"}
 
+    async def send_attachment(
+        self, channel_id: int, filename: str, data: bytes, text: str | None = None
+    ) -> dict:
+        """Attach one file to a message (ADR 0007). Bytes arrive from the
+        consumer; the hub never reads a consumer's disk. Size was already
+        enforced at the API boundary. Registered channels keep their
+        webhook identity — webhooks support file uploads."""
+        import io
+
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            raise LookupError(f"Channel {channel_id} is not a text channel or thread")
+
+        thread = channel if isinstance(channel, discord.Thread) else None
+        reg = self.registry.get(channel_id)
+        if reg is None and thread is not None:
+            reg = self.registry.get(thread.parent_id)
+
+        def make_file() -> discord.File:
+            return discord.File(io.BytesIO(data), filename=filename)
+
+        if reg is not None and reg.webhook_url:
+            webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
+            kwargs: dict[str, Any] = {"wait": True}
+            if reg.display_name:
+                kwargs["username"] = reg.display_name
+            if reg.avatar_url:
+                kwargs["avatar_url"] = reg.avatar_url
+            if thread is not None:
+                kwargs["thread"] = thread
+            message = await webhook.send(content=text, file=make_file(), **kwargs)
+            return {"id": str(message.id), "channel_id": str(channel_id), "via": "webhook"}
+
+        message = await channel.send(content=text, file=make_file())
+        return {"id": str(message.id), "channel_id": str(channel.id), "via": "bot"}
+
     async def create_thread(self, channel_id: int, name: str) -> dict:
         """Create a public thread in a text channel (e.g. one per session)."""
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)

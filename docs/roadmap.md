@@ -24,6 +24,13 @@
   response, defer + followups, typed/ranged options. Verified live.
 - [x] **Messaging extras** — reply-to-message, auto-chunking, typing
   indicators, channel permission preflight. Verified live.
+- [x] **Outbound file attachments** (ADR 0007) — `POST /messages/attachments`,
+  raw bytes + filename, content-agnostic; webhook identity preserved;
+  flat 10 MiB cap with immediate `413` + logged rejection. Built for the
+  trading engine (second real need; see the 2026-10-05 review for the
+  deferred-first evaluation). 7 offline tests. **Not yet live-verified —
+  first live check goes to the 🧪 LAB (#lab-text), real channels only
+  after it works there.**
 
 ## Two-consumer workstream
 
@@ -95,12 +102,7 @@ next hub task.
    **hub API key** worth adding (localhost trust model breaks remotely).
    Small-medium ops session.
 5. **Hub-owned message deletion** — tiny; only if a consumer asks again.
-6. **File attachments in outbound messages** — evaluated 2026-10-05 and
-   deferred under PRINCIPLES #3 (one convenience-grade need, no second
-   need; links already cover the use case). See
-   `docs/reviews/2026-10-05-file-attachments-review.md` for the evidence
-   and a provisional design sketch. Reopen on a second real need.
-7. **"Project is offline" auto-reply** — when a command callback is
+6. **"Project is offline" auto-reply** — when a command callback is
    unreachable, answer the user with something honest instead of a bare
    auto-defer. Small quality-of-life item.
 

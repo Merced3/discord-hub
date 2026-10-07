@@ -7,7 +7,13 @@ from dataclasses import asdict
 from typing import Any
 
 import discord
+import logging
+
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
+
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MiB flat cap (ADR 0007)
 from pydantic import BaseModel
 
 from .bot import HubBot
@@ -89,6 +95,40 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             return await bot.send_message(
                 body.channel_id, body.text, body.reply_to_message_id
             )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except discord.Forbidden as exc:
+            raise HTTPException(status_code=403, detail="Bot lacks permission in that channel") from exc
+
+    @app.post("/messages/attachments", status_code=201)
+    async def send_attachment(request: Request) -> dict:
+        """Attach one file to a message (ADR 0007). Body is the raw file
+        bytes; channel_id and filename are query parameters; optional
+        text becomes the message content. Oversize files are rejected
+        before Discord is touched, and the rejection is logged."""
+        channel_id = request.query_params.get("channel_id")
+        filename = request.query_params.get("filename")
+        text = request.query_params.get("text")
+        if not channel_id or not filename:
+            raise HTTPException(
+                status_code=422, detail="channel_id and filename query parameters required"
+            )
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=422, detail="empty file body")
+        if len(data) > MAX_ATTACHMENT_BYTES:
+            logger.warning(
+                "attachment rejected: %r for channel %s is %d bytes, over the %d-byte cap",
+                filename, channel_id, len(data), MAX_ATTACHMENT_BYTES,
+            )
+            raise HTTPException(
+                status_code=413,
+                detail=f"file too big: {len(data)} bytes exceeds the 10 MiB cap",
+            )
+        try:
+            return await bot.send_attachment(int(channel_id), filename, data, text)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except discord.Forbidden as exc:
