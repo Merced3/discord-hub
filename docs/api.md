@@ -69,10 +69,13 @@ consumer's disk. `filename` is what Discord displays. `text` is optional
 message content. One file per request; send several requests for several
 files. Content-agnostic by design — charts, logs, JSON, anything.
 
-**Size cap: 10 MiB total body, enforced before Discord is touched.**
-Larger files get an immediate `413` with a "too big" detail and the
-rejection is logged hub-side. For bigger files, post a link instead —
-URLs in `POST /messages` text render inline.
+**Size cap: enforced before Discord is touched, and adaptive** (ADR
+0008) — the cap follows the server's live boost tier: 10 MiB base, 50
+MiB at tier 2, 100 MiB at tier 3, with no hub restart needed. Larger
+files get an immediate `413` with a "too big" detail and the rejection
+is logged hub-side. Preflight against the 10 MiB base to be safe
+everywhere. For bigger files, post a link instead — URLs in
+`POST /messages` text render inline.
 
 **Response `201`** — same as `POST /messages`: `{ "id": "456",
 "channel_id": "123", "via": "webhook" | "bot" }`. Registered channels

@@ -14,7 +14,10 @@ import aiohttp
 import discord
 import httpx
 
-from discord_hub.api import MAX_ATTACHMENT_BYTES, create_api
+from discord_hub.api import create_api
+from discord_hub.capabilities import tier_limit
+
+BASE_CAP = tier_limit(0, "attachment_bytes")
 from discord_hub.bot import HubBot
 from discord_hub.commands import CommandStore
 from discord_hub.config import Settings
@@ -49,7 +52,7 @@ class AttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status_code, 422)
 
     async def test_oversize_is_413_and_never_touches_discord(self):
-        big = b"x" * (MAX_ATTACHMENT_BYTES + 1)
+        big = b"x" * (BASE_CAP + 1)
         with self.assertLogs("discord_hub.api", level="WARNING") as logs:
             resp = await self._post({"channel_id": "123", "filename": "big.log"}, big)
         self.assertEqual(resp.status_code, 413)
@@ -62,7 +65,7 @@ class AttachmentTests(unittest.IsolatedAsyncioTestCase):
         sent = Mock(id=456)
         channel.send = AsyncMock(return_value=sent)
         self.bot.get_channel = Mock(return_value=channel)
-        body = b"x" * MAX_ATTACHMENT_BYTES
+        body = b"x" * BASE_CAP
         resp = await self._post({"channel_id": "123", "filename": "chart.png"}, body)
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.json()["via"], "bot")
@@ -109,6 +112,31 @@ class AttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["avatar_url"], "https://example.com/t.png")
         self.assertTrue(kwargs["wait"])
         self.assertEqual(kwargs["file"].filename, "t.json")
+
+    async def test_boosted_tier_raises_cap_without_restart(self):
+        """A 20 MiB file is rejected at tier 0 and accepted the moment the
+        guild reports tier 2 — the limit is read live, not cached."""
+        guild = Mock()
+        guild.premium_tier = 0
+        self.bot.get_guild = Mock(return_value=guild)
+        channel = Mock(spec=discord.TextChannel)
+        channel.id = 123
+        channel.send = AsyncMock(return_value=Mock(id=456))
+        self.bot.get_channel = Mock(return_value=channel)
+        body = b"x" * (20 * 1024 * 1024)
+
+        resp = await self._post({"channel_id": "123", "filename": "big.png"}, body)
+        self.assertEqual(resp.status_code, 413)
+        channel.send.assert_not_called()
+
+        guild.premium_tier = 2  # the server got boosted; no restart
+        resp = await self._post({"channel_id": "123", "filename": "big.png"}, body)
+        self.assertEqual(resp.status_code, 201)
+        channel.send.assert_called_once()
+
+    async def test_unlisted_tier_falls_back_to_base_cap(self):
+        self.assertEqual(tier_limit(1, "attachment_bytes"), BASE_CAP)
+        self.assertEqual(tier_limit(99, "attachment_bytes"), BASE_CAP)
 
     async def test_unknown_channel_is_404(self):
         self.bot.get_channel = Mock(return_value=None)

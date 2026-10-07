@@ -10,6 +10,7 @@ from typing import Any
 import aiohttp
 import discord
 
+from .capabilities import tier_limit as _tier_limit
 from .commands import CommandSpec, CommandStore, build_command
 from .config import Settings
 from .registry import ChannelTakenError, Registration, Registry
@@ -527,6 +528,17 @@ class HubBot(discord.Client):
         """Show 'bot is typing...' in a channel for ~10 seconds."""
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         await self.http.send_typing(channel.id)
+
+    def server_tier(self) -> int:
+        """The guild's current boost tier, read live (ADR 0008). Returns
+        0 before the guild is cached, which is also the base tier."""
+        guild = self.get_guild(self.settings.discord_guild_id)
+        return guild.premium_tier if guild is not None else 0
+
+    def tier_limit(self, name: str) -> int:
+        """The current value of a tier-scaled limit, looked up at call
+        time — never cached, so boosts take effect on the next request."""
+        return _tier_limit(self.server_tier(), name)
 
     def channel_permissions(self, channel_id: int) -> dict:
         """The bot's granted permissions in a channel (preflight helper)."""

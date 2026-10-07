@@ -1,6 +1,8 @@
 # 0007 — Outbound file attachments: bytes over the wire, flat 10 MiB cap
 
-**Status:** accepted
+**Status:** accepted — the flat-cap choice is superseded by ADR 0008
+(adaptive tier lookup); the endpoint shape, bytes-over-wire, and
+fail-before-upload decisions stand.
 
 ## Context
 
@@ -31,7 +33,8 @@ uploads, so in a registered channel the attachment goes through the
 channel's registration webhook (display name, avatar, thread) exactly
 like text sends. Unregistered channels fall back to the plain bot send.
 
-**Flat 10 MiB cap, hard fail.** Discord's upload limit for bots on a
+**~~Flat 10 MiB cap~~ (superseded: ADR 0008 makes the cap follow the
+server's live boost tier) — hard fail either way.** Discord's upload limit for bots on a
 free-tier server is 10 MiB; boosted tiers raise it, and webhook limits
 have historically differed. Rather than probe per-guild tiers, the hub
 enforces one documented cap — **10 MiB total request body** — and

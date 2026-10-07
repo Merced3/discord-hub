@@ -73,8 +73,9 @@ idempotent and keeps the hub in sync after restarts.
   `reply_to_message_id`. Uses your webhook identity when the channel is
   registered to you.
 - `POST /messages/attachments?channel_id=..&filename=..&text=..` — attach
-  one file (body = raw bytes, any content type). 10 MiB cap; bigger files
-  get an immediate `413` — post a link instead. Webhook identity applies.
+  one file (body = raw bytes, any content type). Cap adapts to the
+  server's boost tier (10 MiB base, up to 100 MiB); bigger files get an
+  immediate `413` — post a link instead. Webhook identity applies.
 - `POST /threads` — create a named thread in your channel.
 - `POST /channels/{id}/typing` — show "typing..." (~10s) while you work.
 - `GET /channels/{id}/permissions` — preflight before promising delivery.

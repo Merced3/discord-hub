@@ -12,8 +12,6 @@ import logging
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
-
-MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MiB flat cap (ADR 0007)
 from pydantic import BaseModel
 
 from .bot import HubBot
@@ -116,14 +114,18 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         data = await request.body()
         if not data:
             raise HTTPException(status_code=422, detail="empty file body")
-        if len(data) > MAX_ATTACHMENT_BYTES:
+        # Adaptive cap (ADR 0008): looked up live from the guild's boost
+        # tier, so a boost raises the limit with no restart or code edit.
+        cap = bot.tier_limit("attachment_bytes")
+        if len(data) > cap:
             logger.warning(
-                "attachment rejected: %r for channel %s is %d bytes, over the %d-byte cap",
-                filename, channel_id, len(data), MAX_ATTACHMENT_BYTES,
+                "attachment rejected: %r for channel %s is %d bytes, over the %d-byte "
+                "cap (server boost tier %d)",
+                filename, channel_id, len(data), cap, bot.server_tier(),
             )
             raise HTTPException(
                 status_code=413,
-                detail=f"file too big: {len(data)} bytes exceeds the 10 MiB cap",
+                detail=f"file too big: {len(data)} bytes exceeds the {cap // (1024 * 1024)} MiB cap",
             )
         try:
             return await bot.send_attachment(int(channel_id), filename, data, text)

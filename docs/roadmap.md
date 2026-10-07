@@ -26,11 +26,12 @@
   indicators, channel permission preflight. Verified live.
 - [x] **Outbound file attachments** (ADR 0007) — `POST /messages/attachments`,
   raw bytes + filename, content-agnostic; webhook identity preserved;
-  flat 10 MiB cap with immediate `413` + logged rejection. Built for the
-  trading engine (second real need; see the 2026-10-05 review for the
-  deferred-first evaluation). 7 offline tests. **Not yet live-verified —
-  first live check goes to the 🧪 LAB (#lab-text), real channels only
-  after it works there.**
+  adaptive cap follows the server's live boost tier (ADR 0008: 10 MiB
+  base, 50/100 MiB at tiers 2/3, no restart), immediate `413` + logged
+  rejection. Built for the trading engine (second real need; see the
+  2026-10-05 review for the deferred-first evaluation). 9 offline tests.
+  Live-verified in the 🧪 LAB: small file via webhook identity, 11 MiB
+  file rejected with 413.
 
 ## Two-consumer workstream
 
