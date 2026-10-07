@@ -66,9 +66,9 @@ Requires a `.env` (see `.env.example`). Runtime state lives in `data/`
 
 ## Status
 
-Text routing, threads, webhook identity, project-owned slash commands, and
-full-duplex voice (send + receive with speaking events) are implemented and
-live-verified. See `docs/roadmap.md` and `docs/reviews/` for scope,
+Text routing, threads, webhook identity, project-owned slash commands,
+message edits (send + detect), and full-duplex voice (send + receive with
+speaking events) are implemented and live-verified. See `docs/roadmap.md` and `docs/reviews/` for scope,
 evidence, and remaining work.
 
 ## Tests (no live Discord required)

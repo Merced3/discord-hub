@@ -50,6 +50,13 @@ The hub POSTs each human message: `message_id`, `channel_id`, `author`,
 Failures are logged and **not retried** — if you need durability, build it
 on your side (your own queue, your own storage).
 
+Edits arrive the same way: when a user edits a message in your channel,
+the hub POSTs `{"type": "message_edit", "message_id", "author",
+"before_text", "after_text", "edited_at", ...}`. Every edit is its own
+event, so you can replay the full A→B→C chain. One caveat: `before_text`
+is `null` when the original was sent before the hub last restarted —
+"unknown prior state", not "was empty".
+
 ### 3. Declare your slash commands
 
 `PUT /commands` with your callback URL and command list (names,
@@ -71,7 +78,11 @@ idempotent and keeps the hub in sync after restarts.
 
 - `POST /messages` — send text. Auto-chunks long messages. Optional
   `reply_to_message_id`. Uses your webhook identity when the channel is
-  registered to you.
+  registered to you. **Store the returned `id`** if you ever want to
+  edit the message later; the hub keeps no message history.
+- `PATCH /messages/{id}` — edit a message you sent (body: `channel_id`,
+  `text`). Works for both bot-path and webhook-path sends. Single
+  message, no chunking: max 2000 characters.
 - `POST /messages/attachments?channel_id=..&filename=..&text=..` — attach
   one file (body = raw bytes, any content type). Cap adapts to the
   server's boost tier (10 MiB base, up to 100 MiB); bigger files get an

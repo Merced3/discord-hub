@@ -26,6 +26,11 @@ class SendMessageRequest(BaseModel):
     reply_to_message_id: int | None = None
 
 
+class EditMessageRequest(BaseModel):
+    channel_id: int
+    text: str
+
+
 class CreateThreadRequest(BaseModel):
     channel_id: int
     name: str
@@ -95,6 +100,24 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except discord.Forbidden as exc:
+            raise HTTPException(status_code=403, detail="Bot lacks permission in that channel") from exc
+
+    @app.patch("/messages/{message_id}")
+    async def edit_message(message_id: int, body: EditMessageRequest) -> dict:
+        """Edit a message the hub previously sent. The caller supplies the
+        message id it stored from the send response; the hub keeps no
+        message history."""
+        try:
+            return await bot.edit_message(body.channel_id, message_id, body.text)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except discord.NotFound as exc:
+            raise HTTPException(status_code=404, detail="Message not found in that channel") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.Forbidden as exc:
             raise HTTPException(status_code=403, detail="Bot lacks permission in that channel") from exc
 

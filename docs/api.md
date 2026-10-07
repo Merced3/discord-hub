@@ -86,6 +86,31 @@ endpoint.
 Errors: `413` too big, `422` missing `channel_id`/`filename` or empty
 body, `404` unknown or not a text channel, `403` bot lacks permission.
 
+### `PATCH /messages/{message_id}`
+Edit a message the hub previously sent. The caller supplies the message
+id it stored from the send response — the hub keeps no message history.
+
+**Request**
+```json
+{ "channel_id": 123, "text": "corrected content" }
+```
+
+**Response `200`**
+```json
+{ "id": "456", "channel_id": "123",
+  "edited_at": "2026-01-01T12:05:00+00:00", "via": "bot" }
+```
+
+Only hub-sent messages can be edited (Discord's rule: bots can only edit
+their own messages). Bot-sent messages are edited directly; webhook-sent
+ones are edited through the channel's registration webhook. Unlike
+sending, an edit is a single message — no chunking — so `text` must fit
+Discord's 2000-character limit.
+
+Errors: `422` empty text or over 2000 characters, `404` channel or
+message not found, `403` message not sent by the hub or bot lacks
+permission.
+
 ### `POST /registrations`
 Claim a channel for a project. Creates a webhook in the channel for the
 project's identity (ADR 0002). Registration persists across hub restarts.
@@ -388,6 +413,34 @@ mark. The hub's own reactions are never reported. Whose reaction counts
 and what a marker *means* is the project's policy; the hub only routes.
 The message content is not included — fetch it via
 `GET /channels/{id}/history` if needed.
+
+### Message edit events (automatic)
+When a user edits a message in a registered channel (or a thread under
+it), the hub POSTs an edit event to that project's callback URL — same
+routing as inbound messages, no opt-in flag needed:
+
+```json
+{
+  "type": "message_edit",
+  "message_id": "456",
+  "channel_id": "123",
+  "author": {"id": "789", "name": "cedgo"},
+  "before_text": "orignal content",
+  "after_text": "original content",
+  "edited_at": "2026-01-01T12:05:00+00:00"
+}
+```
+
+Every edit is its own event: a message edited three times delivers three
+events (`A→B`, `B→C`, `C→D`), so a consumer can replay the full history.
+Edits by bots (including the hub itself) are not reported. Threaded
+messages include the same `"thread"` block as inbound messages.
+
+Caveat: `before_text` is the pre-edit content **only if the hub saw the
+original message while it was running** (Discord's message cache). For a
+message sent before the hub last restarted, `before_text` is `null` —
+treat it as "unknown prior state", not "was empty". The event still
+tells you which message changed and what it became.
 
 ## Versioning rule
 

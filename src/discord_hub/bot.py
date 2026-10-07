@@ -275,6 +275,78 @@ class HubBot(discord.Client):
         except (aiohttp.ClientError, TimeoutError):
             logger.warning("message callback failed for channel %s; not retried", message.channel.id)
 
+    async def on_message_edit(
+        self, before: discord.Message, after: discord.Message
+    ) -> None:
+        """Fires only when the pre-edit message is in the local cache;
+        on_raw_message_edit covers the rest."""
+        await self._route_message_edit(after, before_text=before.content)
+
+    async def on_raw_message_edit(self, event: discord.RawMessageUpdateEvent) -> None:
+        """Fires for every edit. When the original was cached,
+        on_message_edit already handled it — skip those to avoid double
+        delivery. For uncached originals, fetch the current state and
+        report the edit with before_text=None (unknown prior state)."""
+        if event.cached_message is not None:
+            return
+        channel = self.get_channel(event.channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(event.channel_id)
+            except (discord.NotFound, discord.Forbidden):
+                return
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return
+        try:
+            message = await channel.fetch_message(event.message_id)
+        except (discord.NotFound, discord.Forbidden):
+            return  # deleted or unreadable between the edit and our fetch
+        await self._route_message_edit(message, before_text=None)
+
+    async def _route_message_edit(
+        self, message: discord.Message, before_text: str | None
+    ) -> None:
+        """Deliver every edit to the channel's registered project, like
+        on_message. The hub is stateless about edits: each one is its own
+        event, so an archiver can replay the full before/after chain."""
+        if message.author.bot:  # same rule as message callbacks
+            return
+        thread_info = None
+        reg = self.registry.get(message.channel.id)
+        if reg is None and isinstance(message.channel, discord.Thread):
+            reg = self.registry.get(message.channel.parent_id)
+            if reg is not None:
+                thread_info = {
+                    "id": str(message.channel.id),
+                    "name": message.channel.name,
+                    "parent_channel_id": str(message.channel.parent_id),
+                }
+        if reg is None:
+            return
+        payload: dict[str, Any] = {
+            "type": "message_edit",
+            "message_id": str(message.id),
+            "channel_id": str(message.channel.id),
+            "author": {"id": str(message.author.id), "name": message.author.display_name},
+            "before_text": before_text,
+            "after_text": message.content,
+            "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+        }
+        if thread_info is not None:
+            payload["thread"] = thread_info
+        try:
+            async with self._http.post(
+                reg.callback_url, json=payload,
+                timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                allow_redirects=False,
+            ) as resp:
+                if not 200 <= resp.status < 300:
+                    logger.warning(
+                        "edit delivery to %s failed: HTTP %s", reg.callback_url, resp.status
+                    )
+        except (aiohttp.ClientError, TimeoutError):
+            logger.warning("edit callback failed for channel %s; not retried", message.channel.id)
+
     async def on_voice_state_update(
         self,
         member: discord.Member,
@@ -454,6 +526,52 @@ class HubBot(discord.Client):
 
         message = await channel.send(content=text, file=make_file())
         return {"id": str(message.id), "channel_id": str(channel.id), "via": "bot"}
+
+    async def edit_message(
+        self, channel_id: int, message_id: int, text: str
+    ) -> dict:
+        """Edit a message the hub previously sent. Discord only lets us
+        edit our own messages: bot-sent ones via Message.edit, webhook-
+        sent ones via the project's webhook. Anything else raises
+        PermissionError. Unlike send, an edit is a single message — no
+        chunking — so text must fit Discord's limit.
+        """
+        if not text.strip():
+            raise ValueError("edited text must not be empty")
+        if len(text) > 2_000:
+            raise ValueError("edited text exceeds Discord's 2000-character limit")
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            raise LookupError(f"Channel {channel_id} is not a text channel or thread")
+
+        thread = channel if isinstance(channel, discord.Thread) else None
+        message = await channel.fetch_message(message_id)  # 404 -> discord.NotFound
+        if self.user is not None and message.author.id == self.user.id:
+            edited = await message.edit(content=text)
+            via = "bot"
+        elif message.webhook_id is not None:
+            reg = self.registry.get(channel_id)
+            if reg is None and thread is not None:
+                reg = self.registry.get(thread.parent_id)
+            if reg is None or not reg.webhook_url:
+                raise PermissionError(
+                    "message was sent via webhook but no registration with a "
+                    "webhook_url covers this channel"
+                )
+            webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
+            kwargs: dict[str, Any] = {}
+            if thread is not None:
+                kwargs["thread"] = thread
+            edited = await webhook.edit_message(message_id, content=text, **kwargs)
+            via = "webhook"
+        else:
+            raise PermissionError("the hub can only edit messages it sent")
+        return {
+            "id": str(message_id),
+            "channel_id": str(channel.id),
+            "edited_at": edited.edited_at.isoformat() if edited.edited_at else None,
+            "via": via,
+        }
 
     async def create_thread(self, channel_id: int, name: str) -> dict:
         """Create a public thread in a text channel (e.g. one per session)."""

@@ -54,6 +54,7 @@ Discord code — they talk to this hub over a local HTTP API.
 - `docs/reviews/` — dated review records (requirements assessments and the
   evidence at the time)
 - `tests/test_channel_operations.py` — offline deletion-safety and history tests
+- `tests/test_message_edits.py` — offline edit routing and PATCH /messages tests
 - `tests/test_multi_client.py` — offline two-project regression suite;
   run with `python -m unittest discover -s tests -v`
 

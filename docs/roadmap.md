@@ -32,6 +32,14 @@
   2026-10-05 review for the deferred-first evaluation). 9 offline tests.
   Live-verified in the 🧪 LAB: small file via webhook identity, 11 MiB
   file rejected with 413.
+- [x] **Message edits, both directions** — outbound: `PATCH
+  /messages/{id}` edits any hub-sent message (bot path or webhook path;
+  caller supplies the stored message id, the hub keeps no history).
+  Inbound: user edits in a registered channel POST a `message_edit`
+  event (before/after text, every edit its own event) to the owning
+  project — no opt-in flag, same routing as messages. Built for a
+  personal-archive consumer that retains everything. 11 offline tests.
+  Awaiting live verification.
 
 ## Two-consumer workstream
 
