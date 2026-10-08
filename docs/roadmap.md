@@ -40,6 +40,21 @@
   project — no opt-in flag, same routing as messages. Built for a
   personal-archive consumer that retains everything. 11 offline tests.
   Awaiting live verification.
+- [x] **Forum support** (ADR 0009) — forums are registrable; posts
+  (which are threads) inherit the registration. Reads: forums in
+  `/server/structure` with `available_tags`, `GET /forums/{id}/posts`
+  (bounded archived pagination), `GET /forums/posts/{id}`. Writes:
+  `POST /forums/{id}/posts` (chunked bodies; webhook identity when
+  untagged, bot identity when tagged — a Discord webhook constraint),
+  comments via the existing message endpoints. Moderation behind the
+  per-registration `allow_forum_moderation` flag: `PATCH
+  /forums/posts/{id}` (rename/retag/archive/lock/pin) and tag-set
+  administration (`POST/PATCH/DELETE /forums/{id}/tags`). Lifecycle
+  events behind `forum_events`: post created/updated (with a `changed`
+  list — renames detected)/deleted and forum-channel updates. Verified
+  live end-to-end in the 🧪 LAB (`scripts/check_forums.py`, 17 checks);
+  cleanup exercised the ADR 0004 human-confirmed deletion path, 20/20
+  posts removed.
 
 ## Two-consumer workstream
 

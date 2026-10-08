@@ -447,6 +447,108 @@ class HubBot(discord.Client):
             except (aiohttp.ClientError, TimeoutError):
                 logger.warning("reaction-marker callback failed for %s; not retried", callback_url)
 
+    # -- forums: lifecycle events (ADR 0009) -------------------------------
+
+    async def _deliver_forum_event(self, reg: Registration, payload: dict) -> None:
+        try:
+            async with self._http.post(
+                reg.callback_url, json=payload,
+                timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                allow_redirects=False,
+            ) as resp:
+                if not 200 <= resp.status < 300:
+                    logger.warning(
+                        "forum-event delivery to %s failed: HTTP %s",
+                        reg.callback_url, resp.status,
+                    )
+        except (aiohttp.ClientError, TimeoutError):
+            logger.warning("forum-event callback failed for %s; not retried", reg.channel_id)
+
+    def _forum_events_reg(self, thread: discord.Thread) -> Registration | None:
+        """The registration governing a forum post's lifecycle events, if
+        the parent forum is registered and opted in."""
+        if not isinstance(thread.parent, discord.ForumChannel):
+            return None
+        if thread.guild is None or thread.guild.id != self.settings.discord_guild_id:
+            return None
+        reg = self.registry.get(thread.parent_id)
+        return reg if reg is not None and reg.forum_events else None
+
+    async def on_thread_create(self, thread: discord.Thread) -> None:
+        reg = self._forum_events_reg(thread)
+        if reg is None:
+            return
+        payload = {"type": "forum.post_created", **self._post_summary(thread)}
+        payload["forum_channel_id"] = str(thread.parent_id)
+        await self._deliver_forum_event(reg, payload)
+
+    async def on_thread_update(self, before: discord.Thread, after: discord.Thread) -> None:
+        reg = self._forum_events_reg(after)
+        if reg is None:
+            return
+        changed = []
+        if before.name != after.name:
+            changed.append("name")
+        if {t.id for t in before.applied_tags} != {t.id for t in after.applied_tags}:
+            changed.append("tags")
+        if before.archived != after.archived:
+            changed.append("archived")
+        if before.locked != after.locked:
+            changed.append("locked")
+        if before.flags.pinned != after.flags.pinned:
+            changed.append("pinned")
+        if not changed:
+            return
+        payload = {"type": "forum.post_updated", "changed": changed,
+                   **self._post_summary(after)}
+        payload["forum_channel_id"] = str(after.parent_id)
+        await self._deliver_forum_event(reg, payload)
+
+    async def on_thread_delete(self, thread: discord.Thread) -> None:
+        reg = self._forum_events_reg(thread)
+        if reg is None:
+            return
+        payload = {"type": "forum.post_deleted", "id": str(thread.id),
+                   "title": thread.name,
+                   "forum_channel_id": str(thread.parent_id)}
+        await self._deliver_forum_event(reg, payload)
+
+    async def on_guild_channel_update(
+        self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel
+    ) -> None:
+        if not isinstance(after, discord.ForumChannel):
+            return
+        if after.guild.id != self.settings.discord_guild_id:
+            return
+        reg = self.registry.get(after.id)
+        if reg is None or not reg.forum_events:
+            return
+        before_forum = before if isinstance(before, discord.ForumChannel) else None
+        changed = []
+        if before.name != after.name:
+            changed.append("name")
+        if before_forum is not None and (
+            {t.id for t in before_forum.available_tags}
+            != {t.id for t in after.available_tags}
+            or [t.name for t in before_forum.available_tags]
+            != [t.name for t in after.available_tags]
+        ):
+            changed.append("available_tags")
+        if getattr(before, "slowmode_delay", None) != after.slowmode_delay:
+            changed.append("slowmode")
+        if not changed:
+            return
+        payload = {
+            "type": "forum.channel_updated",
+            "changed": changed,
+            "id": str(after.id),
+            "name": after.name,
+            "available_tags": [
+                {"id": str(t.id), "name": t.name} for t in after.available_tags
+            ],
+        }
+        await self._deliver_forum_event(reg, payload)
+
     # -- outbound: project -> Discord ------------------------------------
 
     async def send_message(
@@ -647,6 +749,251 @@ class HubBot(discord.Client):
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         await self.http.send_typing(channel.id)
 
+    # -- forums (ADR 0009) --------------------------------------------------
+
+    def _get_forum(self, channel_id: int) -> discord.ForumChannel:
+        guild = self.get_guild(self.settings.discord_guild_id)
+        channel = self.get_channel(channel_id)
+        if guild is None or not isinstance(channel, discord.ForumChannel):
+            raise LookupError(f"Channel {channel_id} is not a forum in the configured server")
+        if channel.guild.id != guild.id:
+            raise PermissionError("Forum is outside the configured server")
+        perms = channel.permissions_for(guild.me)
+        if not (perms.view_channel and perms.read_message_history):
+            raise PermissionError("Reading a forum requires View Channel and Read Message History")
+        return channel
+
+    @staticmethod
+    def _post_summary(thread: discord.Thread) -> dict:
+        return {
+            "id": str(thread.id),
+            "title": thread.name,
+            "author": {"id": str(thread.owner_id), "name": thread.owner.display_name}
+            if thread.owner else None,
+            "tags": [{"id": str(t.id), "name": t.name} for t in thread.applied_tags],
+            "created_at": thread.created_at.isoformat(),
+            "comment_count": thread.message_count,
+            "pinned": thread.flags.pinned,
+            "locked": thread.locked,
+            "archived": thread.archived,
+        }
+
+    async def forum_posts(
+        self, channel_id: int, include_archived: bool = False, limit: int = 50
+    ) -> dict:
+        """Active posts from cache; archived only on request, and bounded
+        (ADR 0009: no request may trigger an unbounded crawl)."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be 1..100")
+        forum = self._get_forum(channel_id)
+        posts = [self._post_summary(t) for t in forum.threads]
+        truncated = False
+        if include_archived:
+            remaining = limit - len(posts)
+            if remaining > 0:
+                async for thread in forum.archived_threads(limit=remaining):
+                    posts.append(self._post_summary(thread))
+            truncated = len(posts) >= limit
+        return {
+            "channel_id": str(channel_id),
+            "posts": posts[:limit],
+            # True means more archived posts likely exist beyond the limit.
+            "truncated": truncated,
+        }
+
+    async def create_forum_post(
+        self, channel_id: int, title: str, text: str, tag_ids: list[int] | None = None
+    ) -> dict:
+        """Create a post in a forum channel. Long bodies chunk like regular
+        sends: the first chunk is the post body, the rest become comments.
+        Bot identity until the webhook path lands (ADR 0009, phase 3)."""
+        forum = self._get_forum(channel_id)
+        if not forum.permissions_for(forum.guild.me).send_messages:
+            raise PermissionError("Creating posts requires Send Messages (Create Posts)")
+        available = {t.id: t for t in forum.available_tags}
+        unknown = [t for t in (tag_ids or []) if t not in available]
+        if unknown:
+            raise ValueError(f"unknown tag id(s) for this forum: {unknown}")
+        kwargs: dict[str, Any] = {}
+        if tag_ids:
+            kwargs["applied_tags"] = [available[t] for t in tag_ids]
+        chunks = _chunks(text)
+        chunks = _chunks(text)
+        # Webhook identity (ADR 0002/0009): in a registered forum, posts go
+        # through the project's webhook. Discord can't apply tags on a
+        # webhook execute, so tag_ids force the bot path.
+        reg = self.registry.get(channel_id)
+        if not tag_ids and reg is not None and reg.webhook_url:
+            webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
+            wkwargs: dict[str, Any] = {"wait": True}
+            if reg.display_name:
+                wkwargs["username"] = reg.display_name
+            if reg.avatar_url:
+                wkwargs["avatar_url"] = reg.avatar_url
+            try:
+                starter = await webhook.send(chunks[0], thread_name=title, **wkwargs)
+                thread = await self.fetch_channel(starter.id)
+                for chunk in chunks[1:]:
+                    await webhook.send(chunk, thread=thread, **wkwargs)
+                post = self._post_summary(thread)
+                post["forum_channel_id"] = str(channel_id)
+                post["via"] = "webhook"
+                logger.info("created forum post %s in %s via webhook", thread.id, channel_id)
+                return post
+            except discord.HTTPException:
+                logger.warning(
+                    "webhook post in forum %s failed; falling back to bot identity",
+                    channel_id,
+                )
+        result = await forum.create_thread(name=title, content=chunks[0], **kwargs)
+        # Newer discord.py returns ThreadWithMessage; older returned Thread.
+        thread = getattr(result, "thread", result)
+        for chunk in chunks[1:]:
+            await thread.send(chunk)
+        post = self._post_summary(thread)
+        post["forum_channel_id"] = str(channel_id)
+        post["via"] = "bot"
+        logger.info("created forum post %s in %s", thread.id, channel_id)
+        return post
+
+    def _forum_moderation_reg(self, forum_id: int) -> Registration:
+        """Gate for moderation-class forum actions (ADR 0009): the forum's
+        registration must have opted in. Same declared-intent pattern as
+        ADR 0004."""
+        reg = self.registry.get(forum_id)
+        if reg is None or not reg.allow_forum_moderation:
+            raise PermissionError(
+                "Forum moderation is not enabled for this channel's registration"
+            )
+        return reg
+
+    async def _get_post(self, post_id: int) -> discord.Thread:
+        channel = self.get_channel(post_id) or await self.fetch_channel(post_id)
+        if not isinstance(channel, discord.Thread) or not isinstance(
+            channel.parent, discord.ForumChannel
+        ):
+            raise LookupError(f"{post_id} is not a forum post")
+        self._get_forum(channel.parent_id)
+        return channel
+
+    async def update_forum_post(
+        self,
+        post_id: int,
+        title: str | None = None,
+        tag_ids: list[int] | None = None,
+        archived: bool | None = None,
+        locked: bool | None = None,
+        pinned: bool | None = None,
+    ) -> dict:
+        """Moderation-class edits to a post, gated on the parent forum's
+        allow_forum_moderation registration flag (ADR 0009)."""
+        thread = await self._get_post(post_id)
+        self._forum_moderation_reg(thread.parent_id)
+        kwargs: dict[str, Any] = {}
+        if title is not None:
+            kwargs["name"] = title
+        if tag_ids is not None:
+            available = {t.id: t for t in thread.parent.available_tags}
+            unknown = [t for t in tag_ids if t not in available]
+            if unknown:
+                raise ValueError(f"unknown tag id(s) for this forum: {unknown}")
+            kwargs["applied_tags"] = [available[t] for t in tag_ids]
+        if archived is not None:
+            kwargs["archived"] = archived
+        if locked is not None:
+            kwargs["locked"] = locked
+        if pinned is not None:
+            kwargs["pinned"] = pinned
+        if not kwargs:
+            raise ValueError("nothing to update")
+        thread = await thread.edit(**kwargs)
+        logger.info("updated forum post %s: %s", post_id, sorted(kwargs))
+        post = self._post_summary(thread)
+        post["forum_channel_id"] = str(thread.parent_id)
+        return post
+
+    async def _fresh_forum(self, channel_id: int) -> discord.ForumChannel:
+        """Validated forum, re-fetched over HTTP so available_tags is current
+        (tag creation returns before the channel cache observes it)."""
+        self._get_forum(channel_id)
+        forum = await self.fetch_channel(channel_id)
+        if not isinstance(forum, discord.ForumChannel):
+            raise LookupError(f"Channel {channel_id} is not a forum in the configured server")
+        return forum
+
+    async def create_forum_tag(
+        self, channel_id: int, name: str, moderated: bool = False
+    ) -> dict:
+        """Add to the forum's available tag set (caretaker, ADR 0009)."""
+        forum = self._get_forum(channel_id)
+        self._forum_moderation_reg(channel_id)
+        if not forum.permissions_for(forum.guild.me).manage_channels:
+            raise PermissionError("Tag administration requires Manage Channels")
+        tag = await forum.create_tag(name=name, moderated=moderated)
+        logger.info("created tag %s (%s) in forum %s", tag.name, tag.id, channel_id)
+        return {"id": str(tag.id), "name": tag.name, "moderated": tag.moderated}
+
+    async def update_forum_tag(
+        self, channel_id: int, tag_id: int,
+        name: str | None = None, moderated: bool | None = None,
+    ) -> dict:
+        forum = await self._fresh_forum(channel_id)
+        self._forum_moderation_reg(channel_id)
+        if not forum.permissions_for(forum.guild.me).manage_channels:
+            raise PermissionError("Tag administration requires Manage Channels")
+        tag = next((t for t in forum.available_tags if t.id == tag_id), None)
+        if tag is None:
+            raise LookupError(f"Tag {tag_id} not found in forum {channel_id}")
+        if name is None and moderated is None:
+            raise ValueError("nothing to update")
+        updated = discord.ForumTag(
+            name=name if name is not None else tag.name,
+            moderated=moderated if moderated is not None else tag.moderated,
+        )
+        # ForumTag's constructor takes no id; assign it so Discord treats
+        # this as an edit of the existing tag, not a new one.
+        updated.id = tag_id
+        tags = [updated if t.id == tag_id else t for t in forum.available_tags]
+        await forum.edit(available_tags=tags)
+        logger.info("updated tag %s in forum %s", tag_id, channel_id)
+        return {"id": str(tag_id),
+                "name": name if name is not None else tag.name,
+                "moderated": moderated if moderated is not None else tag.moderated}
+
+    async def delete_forum_tag(self, channel_id: int, tag_id: int) -> None:
+        forum = await self._fresh_forum(channel_id)
+        self._forum_moderation_reg(channel_id)
+        if not forum.permissions_for(forum.guild.me).manage_channels:
+            raise PermissionError("Tag administration requires Manage Channels")
+        tags = [t for t in forum.available_tags if t.id != tag_id]
+        if len(tags) == len(forum.available_tags):
+            raise LookupError(f"Tag {tag_id} not found in forum {channel_id}")
+        await forum.edit(available_tags=tags)
+        logger.info("deleted tag %s from forum %s", tag_id, channel_id)
+
+    async def forum_post(self, post_id: int) -> dict:
+        """One post: summary plus the starter message body."""
+        channel = self.get_channel(post_id) or await self.fetch_channel(post_id)
+        if not isinstance(channel, discord.Thread) or not isinstance(
+            channel.parent, discord.ForumChannel
+        ):
+            raise LookupError(f"{post_id} is not a forum post")
+        self._get_forum(channel.parent_id)  # guild + permission checks
+        post = self._post_summary(channel)
+        post["forum_channel_id"] = str(channel.parent_id)
+        try:
+            starter = await channel.fetch_message(channel.id)
+        except discord.NotFound:
+            starter = None
+        post["body"] = starter.content if starter else None
+        if starter is not None:
+            post["attachments"] = [
+                {"id": str(a.id), "filename": a.filename, "size": a.size,
+                 "content_type": a.content_type, "url": a.url}
+                for a in starter.attachments
+            ]
+        return post
+
     def server_tier(self) -> int:
         """The guild's current boost tier, read live (ADR 0008). Returns
         0 before the guild is cached, which is also the base tier."""
@@ -830,11 +1177,14 @@ class HubBot(discord.Client):
         allow_thread_deletion: bool = False,
         voice_events: bool = False,
         reaction_events: bool = False,
+        allow_forum_moderation: bool = False,
+        forum_events: bool = False,
     ) -> Registration:
         async with self._registrations_lock:
             return await self._register_channel(
                 channel_id, callback_url, display_name, avatar_url,
                 allow_thread_deletion, voice_events, reaction_events,
+                allow_forum_moderation, forum_events,
             )
 
     async def _register_channel(
@@ -842,12 +1192,13 @@ class HubBot(discord.Client):
         display_name: str | None, avatar_url: str | None,
         allow_thread_deletion: bool, voice_events: bool = False,
         reaction_events: bool = False,
+        allow_forum_moderation: bool = False, forum_events: bool = False,
     ) -> Registration:
         if self.registry.get(channel_id) is not None:
             raise ChannelTakenError(f"channel {channel_id} is already registered")
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            raise LookupError(f"Channel {channel_id} is not a text channel")
+        if not isinstance(channel, (discord.TextChannel, discord.ForumChannel)):
+            raise LookupError(f"Channel {channel_id} is not a text or forum channel")
         webhook = await channel.create_webhook(name=f"hub: {display_name or 'project'}")
         reg = Registration(
             channel_id=channel_id,
@@ -858,6 +1209,8 @@ class HubBot(discord.Client):
             allow_thread_deletion=allow_thread_deletion,
             voice_events=voice_events,
             reaction_events=reaction_events,
+            allow_forum_moderation=allow_forum_moderation,
+            forum_events=forum_events,
         )
         try:
             self.registry.add(reg)
@@ -902,7 +1255,18 @@ class HubBot(discord.Client):
                     )
                 elif isinstance(ch, discord.ForumChannel):
                     entries.append(
-                        {"id": str(ch.id), "name": ch.name, "type": "forum", "topic": ch.topic or ""}
+                        {
+                            "id": str(ch.id), "name": ch.name, "type": "forum",
+                            "topic": ch.topic or "",
+                            "available_tags": [
+                                {
+                                    "id": str(t.id), "name": t.name,
+                                    "emoji": str(t.emoji) if t.emoji else None,
+                                    "moderated": t.moderated,
+                                }
+                                for t in ch.available_tags
+                            ],
+                        }
                     )
                 elif isinstance(ch, discord.VoiceChannel):
                     entries.append({"id": str(ch.id), "name": ch.name, "type": "voice"})

@@ -12,7 +12,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .bot import HubBot
 from .commands import CommandNameTakenError, CommandSpec
@@ -36,6 +36,12 @@ class CreateThreadRequest(BaseModel):
     name: str
 
 
+class CreateForumPostRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1)
+    tag_ids: list[int] = []
+
+
 class RegisterRequest(BaseModel):
     channel_id: int
     callback_url: str
@@ -44,6 +50,26 @@ class RegisterRequest(BaseModel):
     allow_thread_deletion: bool = False
     voice_events: bool = False
     reaction_events: bool = False
+    allow_forum_moderation: bool = False
+    forum_events: bool = False
+
+
+class UpdateForumPostRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    tag_ids: list[int] | None = None
+    archived: bool | None = None
+    locked: bool | None = None
+    pinned: bool | None = None
+
+
+class CreateForumTagRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=20)
+    moderated: bool = False
+
+
+class UpdateForumTagRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=20)
+    moderated: bool | None = None
 
 
 class CommandOption(BaseModel):
@@ -182,6 +208,100 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(status_code=502, detail="Discord could not complete thread deletion") from exc
         return Response(status_code=204)
 
+    @app.get("/forums/{channel_id}/posts")
+    async def forum_posts(
+        channel_id: int,
+        include_archived: bool = Query(default=False),
+        limit: int = Query(default=50, ge=1, le=100),
+    ) -> dict:
+        try:
+            return await bot.forum_posts(channel_id, include_archived, limit)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not list forum posts") from exc
+
+    @app.post("/forums/{channel_id}/posts", status_code=201)
+    async def create_forum_post(channel_id: int, body: CreateForumPostRequest) -> dict:
+        try:
+            return await bot.create_forum_post(
+                channel_id, body.title, body.text, body.tag_ids
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not create the post") from exc
+
+    @app.patch("/forums/posts/{post_id}")
+    async def update_forum_post(post_id: int, body: UpdateForumPostRequest) -> dict:
+        try:
+            return await bot.update_forum_post(
+                post_id, body.title, body.tag_ids, body.archived, body.locked, body.pinned
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (LookupError, discord.NotFound) as exc:
+            raise HTTPException(status_code=404, detail="Forum post not found") from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not update the post") from exc
+
+    @app.post("/forums/{channel_id}/tags", status_code=201)
+    async def create_forum_tag(channel_id: int, body: CreateForumTagRequest) -> dict:
+        try:
+            return await bot.create_forum_tag(channel_id, body.name, body.moderated)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not create the tag") from exc
+
+    @app.patch("/forums/{channel_id}/tags/{tag_id}")
+    async def update_forum_tag(
+        channel_id: int, tag_id: int, body: UpdateForumTagRequest
+    ) -> dict:
+        try:
+            return await bot.update_forum_tag(channel_id, tag_id, body.name, body.moderated)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not update the tag") from exc
+
+    @app.delete("/forums/{channel_id}/tags/{tag_id}", status_code=204)
+    async def delete_forum_tag(channel_id: int, tag_id: int) -> Response:
+        try:
+            await bot.delete_forum_tag(channel_id, tag_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not delete the tag") from exc
+        return Response(status_code=204)
+
+    @app.get("/forums/posts/{post_id}")
+    async def forum_post(post_id: int) -> dict:
+        try:
+            return await bot.forum_post(post_id)
+        except (LookupError, discord.NotFound) as exc:
+            raise HTTPException(status_code=404, detail="Forum post not found") from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord could not read the forum post") from exc
+
     @app.get("/channels/{channel_id}/history")
     async def channel_history(
         channel_id: int, limit: int = Query(default=50, ge=1, le=100),
@@ -252,6 +372,7 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             reg = await bot.register(
                 body.channel_id, body.callback_url, body.display_name, body.avatar_url,
                 body.allow_thread_deletion, body.voice_events, body.reaction_events,
+                body.allow_forum_moderation, body.forum_events,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

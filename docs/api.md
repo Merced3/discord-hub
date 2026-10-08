@@ -62,6 +62,107 @@ channel's registration webhook — identity belongs to the *channel's owner*,
 not the caller (the hub trusts local callers; it does not authenticate who
 sent a given request). The response gains a `"via": "webhook"` field.
 
+### `GET /forums/{channel_id}/posts`
+List posts in a forum channel (ADR 0009). Active posts come from cache;
+`?include_archived=true` also paginates archived posts, bounded by
+`?limit=` (1–100, default 50) so no request can crawl an old forum
+unbounded.
+
+**Response `200`** (shape illustrative)
+```json
+{
+  "channel_id": "123",
+  "posts": [
+    {
+      "id": "456",
+      "title": "My post",
+      "author": { "id": "789", "name": "Merced" },
+      "tags": [{ "id": "111", "name": "holding" }],
+      "created_at": "2026-10-08T17:00:00+00:00",
+      "comment_count": 3,
+      "pinned": false,
+      "locked": false,
+      "archived": false
+    }
+  ],
+  "truncated": false
+}
+```
+`truncated: true` means more archived posts likely exist beyond `limit`.
+Errors: `404` not a forum channel, `403` bot lacks View Channel / Read
+Message History.
+
+### `POST /forums/{channel_id}/posts`
+Create a post (ADR 0009).
+
+**Request**
+```json
+{ "title": "My post", "text": "body", "tag_ids": ["111"] }
+```
+`title` 1–100 chars; `text` is chunked like regular sends — the first
+chunk is the post body, the rest become comments. `tag_ids` must come
+from the forum's `available_tags` (see `/server/structure`); unknown ids
+get `422` before Discord is touched. Bot identity for now (`"via":
+"bot"`); webhook identity arrives with ADR 0009 phase 3.
+
+**Response `201`** — the post summary (same shape as the list endpoint,
+plus `forum_channel_id` and `via`).
+
+Errors: `404` not a forum channel, `403` missing Create Posts, `422`
+unknown tag ids.
+
+Commenting on a post is plain `POST /messages` with the post id as
+`channel_id`; reactions, edits, typing, and attachments likewise reuse
+the existing message endpoints.
+
+In a **registered** forum, untagged post creation goes through the
+project's registration webhook (`"via": "webhook"`, ADR 0002), with
+fallback to bot identity if the webhook send fails. When `tag_ids` are
+present the post is always bot-created — Discord cannot apply tags on a
+webhook execute.
+
+### `PATCH /forums/posts/{post_id}`
+Moderation-class edits (ADR 0009). All fields optional; at least one
+required.
+
+**Request**
+```json
+{ "title": "new name", "tag_ids": ["111"], "archived": false, "locked": true, "pinned": true }
+```
+Gated: the parent forum must be registered with
+`allow_forum_moderation: true` (`403` otherwise), and Discord's Manage
+Threads still applies. Note Discord allows very few pinned posts per
+forum (error 30047) — a failed pin surfaces as `502`.
+
+### `POST /forums/{channel_id}/tags` · `PATCH /forums/{channel_id}/tags/{tag_id}` · `DELETE /forums/{channel_id}/tags/{tag_id}`
+Administer the forum's available tag set (caretaker, ADR 0009). Create
+takes `{ "name": "holding", "moderated": false }`; update takes optional
+`name` / `moderated`. Tag ids are preserved across renames. Gated on
+`allow_forum_moderation` plus Discord's Manage Channels. Tag names must
+be unique per forum (`502` with Discord's detail otherwise).
+
+### Forum lifecycle events
+A forum registered with `forum_events: true` receives callback POSTs:
+
+- `{ "type": "forum.post_created", ...post summary }`
+- `{ "type": "forum.post_updated", "changed": ["name" | "tags" | "archived" | "locked" | "pinned"], ...post summary }`
+  — renames included, per the owner's requirement
+- `{ "type": "forum.post_deleted", "id", "title", "forum_channel_id" }`
+- `{ "type": "forum.channel_updated", "changed": ["name" | "available_tags" | "slowmode"], ... }`
+  — the forum channel itself was renamed or its tag set changed
+
+Delivery is best-effort with no retries, same as message callbacks.
+
+### `GET /forums/posts/{post_id}`
+One post: the summary fields above plus `forum_channel_id`, the starter
+message `body`, and its `attachments`. Comments are read with
+`GET /channels/{post_id}/history` — a post is a thread.
+
+Errors: `404` not a forum post, `403` missing permissions.
+
+Forum channels appear in `GET /server/structure` as `type: "forum"`
+with an `available_tags` list (`id`, `name`, `emoji`, `moderated`).
+
 ### `POST /messages/attachments?channel_id=123&filename=report.json&text=optional`
 Attach one file to a message (ADR 0007). The request **body is the raw
 file bytes** (`application/octet-stream`); the hub never reads a
@@ -114,6 +215,8 @@ permission.
 ### `POST /registrations`
 Claim a channel for a project. Creates a webhook in the channel for the
 project's identity (ADR 0002). Registration persists across hub restarts.
+Both text and forum channels can be registered; a forum's posts inherit
+its registration.
 
 **Request**
 ```json
@@ -127,8 +230,11 @@ project's identity (ADR 0002). Registration persists across hub restarts.
 ```
 `display_name` and `avatar_url` are optional. `allow_thread_deletion`
 (default `false`) opts the channel's threads into `DELETE /threads/{id}`;
-deregistering revokes it. Event opt-ins: `"voice_events": true` (voice
-join/leave/move) and `"reaction_events": true` (reaction markers) — see
+deregistering revokes it. Forum opt-ins (ADR 0009, both default `false`):
+`allow_forum_moderation` permits post PATCH and tag administration;
+`forum_events` subscribes the callback to forum lifecycle events. Event
+opt-ins: `"voice_events": true` (voice join/leave/move) and
+`"reaction_events": true` (reaction markers) — see
 their sections below.
 
 **Response `201`** — the registration, including the created `webhook_url`.

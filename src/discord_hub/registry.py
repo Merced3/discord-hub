@@ -38,6 +38,17 @@ class Registration:
     # callback URL. Default False; consumers opt in. The emoji -> marker
     # mapping is hub config; what a marker *means* is the project's policy.
     reaction_events: bool = False
+    # Declared intent (ADR 0009): on a forum registration, permits
+    # moderation-class actions — retag / rename / archive / lock / pin posts
+    # and administering the forum's available tag set. Default False; the
+    # consumer still confirms destructive actions with the owner. Discord's
+    # Manage Threads / Manage Channels still apply; the hub never grants
+    # itself permissions.
+    allow_forum_moderation: bool = False
+    # Declared intent (ADR 0009): on a forum registration, this project wants
+    # forum lifecycle events (post created/updated/deleted, forum channel
+    # renamed or tag set changed) POSTed to its callback URL. Default False.
+    forum_events: bool = False
 
 
 class ChannelTakenError(RuntimeError):
