@@ -68,7 +68,10 @@ Requires a `.env` (see `.env.example`). Runtime state lives in `data/`
 
 Text routing, threads, webhook identity, project-owned slash commands,
 message edits (send + detect), and full-duplex voice (send + receive with
-speaking events) are implemented and live-verified. See `docs/roadmap.md` and `docs/reviews/` for scope,
+speaking events) are implemented and live-verified. Multi-project
+concurrency (two consumers at once: routing isolation, fair rate-limit
+sharing, fault isolation, crash recovery) is also live-verified — see
+`docs/reviews/2026-10-13-multi-project-live-concurrency-review.md`. See `docs/roadmap.md` and `docs/reviews/` for scope,
 evidence, and remaining work.
 
 ## Tests (no live Discord required)
