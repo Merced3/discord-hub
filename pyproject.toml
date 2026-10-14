@@ -25,3 +25,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/discord_hub"]
+
+# Allow direct git references in dependencies (voice-recv is pinned to a
+# PR branch until a release ships DAVE support, ADR 0005). Without this,
+# hatchling refuses to build the project at all (hit during VPS deploy).
+[tool.hatch.metadata]
+allow-direct-references = true
