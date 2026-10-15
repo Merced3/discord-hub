@@ -29,20 +29,34 @@ async def show_forum(bot, channel_id: int) -> None:
     if channel.topic:
         print(f"topic: {channel.topic}\n")
     tags = channel.available_tags
-    print("Tags: " + (", ".join(
-        f"{t.name} ({t.id}){'[moderated]' if t.moderated else ''}" for t in tags
-    ) if tags else "none"))
+    print(
+        "Tags: "
+        + (
+            ", ".join(f"{t.name} ({t.id}){'[moderated]' if t.moderated else ''}" for t in tags)
+            if tags
+            else "none"
+        )
+    )
     listing = await bot.forum_posts(channel_id, include_archived=True, limit=100)
-    print(f"Posts: {len(listing['posts'])}" + (" (truncated at limit)" if listing["truncated"] else ""))
+    print(
+        f"Posts: {len(listing['posts'])}"
+        + (" (truncated at limit)" if listing["truncated"] else "")
+    )
     for p in listing["posts"]:
         flags = " ".join(
-            f"[{f}]" for f in ("pinned" if p["pinned"] else "",
-                               "locked" if p["locked"] else "",
-                               "archived" if p["archived"] else "") if f
+            f"[{f}]"
+            for f in (
+                "pinned" if p["pinned"] else "",
+                "locked" if p["locked"] else "",
+                "archived" if p["archived"] else "",
+            )
+            if f
         )
         tag_names = ", ".join(t["name"] for t in p["tags"])
-        print(f"  {p['id']}  {p['title']!r}  comments={p['comment_count']}"
-              f"{'  tags: ' + tag_names if tag_names else ''}{'  ' + flags if flags else ''}")
+        print(
+            f"  {p['id']}  {p['title']!r}  comments={p['comment_count']}"
+            f"{'  tags: ' + tag_names if tag_names else ''}{'  ' + flags if flags else ''}"
+        )
 
 
 async def main() -> None:

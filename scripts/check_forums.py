@@ -18,8 +18,8 @@ from __future__ import annotations
 import asyncio
 
 import discord
-from aiohttp import web
 from _connect import connected_bot, run
+from aiohttp import web
 
 LAB_FORUM = 1554203089832124506
 CALLBACK_PORT = 8199
@@ -65,18 +65,20 @@ async def _check() -> None:
         print("phase 1: reads")
         structure = bot.server_structure()
         entry = next(
-            c for cat in structure["categories"] if "LAB" in cat["name"]
-            for c in cat["channels"] if c["type"] == "forum"
+            c
+            for cat in structure["categories"]
+            if "LAB" in cat["name"]
+            for c in cat["channels"]
+            if c["type"] == "forum"
         )
-        check("structure lists forum with available_tags",
-              isinstance(entry.get("available_tags"), list))
+        check(
+            "structure lists forum with available_tags",
+            isinstance(entry.get("available_tags"), list),
+        )
 
-        seeded = (await forum.create_thread(
-            name="check-forums seed", content="seed body"
-        )).thread
+        seeded = (await forum.create_thread(name="check-forums seed", content="seed body")).thread
         posts = await bot.forum_posts(LAB_FORUM)
-        check("forum_posts lists the seed",
-              any(p["id"] == str(seeded.id) for p in posts["posts"]))
+        check("forum_posts lists the seed", any(p["id"] == str(seeded.id) for p in posts["posts"]))
         one = await bot.forum_post(seeded.id)
         check("forum_post returns body", one["body"] == "seed body")
         await bot.forum_posts(LAB_FORUM, include_archived=True, limit=10)
@@ -86,9 +88,9 @@ async def _check() -> None:
         print("phase 2: writes")
         existing = {t.name: t for t in forum.available_tags}
         if "test-red" not in existing:
-            await forum.edit(available_tags=list(forum.available_tags) + [
-                discord.ForumTag(name="test-red")
-            ])
+            await forum.edit(
+                available_tags=list(forum.available_tags) + [discord.ForumTag(name="test-red")]
+            )
             forum = await bot.fetch_channel(LAB_FORUM)
             existing = {t.name: t for t in forum.available_tags}
         tag = existing["test-red"]
@@ -96,8 +98,10 @@ async def _check() -> None:
         tagged = await bot.create_forum_post(
             LAB_FORUM, "check-forums tagged", "body", tag_ids=[tag.id]
         )
-        check("tagged post created (bot identity)",
-              tagged["via"] == "bot" and tagged["tags"][0]["name"] == "test-red")
+        check(
+            "tagged post created (bot identity)",
+            tagged["via"] == "bot" and tagged["tags"][0]["name"] == "test-red",
+        )
 
         long_post = await bot.create_forum_post(LAB_FORUM, "check-forums chunked", "x" * 4500)
         history = await bot.channel_history(int(long_post["id"]), limit=10)
@@ -117,9 +121,11 @@ async def _check() -> None:
         if bot.registry.get(LAB_FORUM) is not None:
             await bot.deregister(LAB_FORUM)
         reg = await bot.register(
-            LAB_FORUM, f"http://127.0.0.1:{CALLBACK_PORT}/cb",
+            LAB_FORUM,
+            f"http://127.0.0.1:{CALLBACK_PORT}/cb",
             display_name="Forum Check",
-            allow_forum_moderation=True, forum_events=True,
+            allow_forum_moderation=True,
+            forum_events=True,
         )
         check("forum registers with webhook", bool(reg.webhook_url))
 
@@ -132,15 +138,19 @@ async def _check() -> None:
         updated = await bot.update_forum_post(
             int(post_wh["id"]), title="check-forums RENAMED", tag_ids=[tag.id], pinned=True
         )
-        check("PATCH rename/retag/pin",
-              updated["title"] == "check-forums RENAMED" and updated["pinned"])
+        check(
+            "PATCH rename/retag/pin",
+            updated["title"] == "check-forums RENAMED" and updated["pinned"],
+        )
 
         fresh = await bot.fetch_channel(LAB_FORUM)
         for t in list(fresh.available_tags):
             if t.name.startswith("check-forums-temp"):
                 await bot.delete_forum_tag(LAB_FORUM, t.id)
         new_tag = await bot.create_forum_tag(LAB_FORUM, "check-forums-temp")
-        renamed = await bot.update_forum_tag(LAB_FORUM, int(new_tag["id"]), name="check-forums-temp2")
+        renamed = await bot.update_forum_tag(
+            LAB_FORUM, int(new_tag["id"]), name="check-forums-temp2"
+        )
         await bot.delete_forum_tag(LAB_FORUM, int(new_tag["id"]))
         check("tag admin create/rename/delete", renamed["name"] == "check-forums-temp2")
 
@@ -154,7 +164,8 @@ async def _check() -> None:
         types = [e["type"] for e in events]
         check("event: forum.post_created", "forum.post_created" in types)
         rename_events = [
-            e for e in events
+            e
+            for e in events
             if e["type"] == "forum.post_updated" and "name" in e.get("changed", [])
         ]
         check("event: rename detected (changed=['name', ...])", bool(rename_events))

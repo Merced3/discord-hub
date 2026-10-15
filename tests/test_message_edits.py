@@ -5,19 +5,20 @@ No real .env, token, Discord, or project state. Discord operations are
 mocked; callback delivery uses real localhost HTTP.
 Run: python -m unittest discover -s tests -v
 """
+
 from __future__ import annotations
 
+import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
-from aiohttp import web
 import discord
 import httpx
+from aiohttp import web
 
 from discord_hub.api import create_api
 from discord_hub.bot import HubBot
@@ -32,7 +33,9 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp.cleanup)
         settings = Settings(_env_file=None, discord_token="fake-token", discord_guild_id=1)
         self.registry = Registry(Path(self.temp.name) / "registrations.json")
-        self.bot = HubBot(settings, self.registry, CommandStore(Path(self.temp.name) / "commands.json"))
+        self.bot = HubBot(
+            settings, self.registry, CommandStore(Path(self.temp.name) / "commands.json")
+        )
         self.bot._http = aiohttp.ClientSession()
         self.addAsyncCleanup(self.bot._http.close)
         # Webhook.from_url pulls the HTTP session off the client, which is
@@ -70,9 +73,13 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
                 url="https://discord.com/api/webhooks/123456789012345678/" + "a" * 60
             )
         )
-        response = await self.client.post("/registrations", json={
-            "channel_id": 10, "callback_url": self.callback_url,
-        })
+        response = await self.client.post(
+            "/registrations",
+            json={
+                "channel_id": 10,
+                "callback_url": self.callback_url,
+            },
+        )
         self.assertEqual(response.status_code, 201, response.text)
 
     def channel(self, cid=10):
@@ -86,9 +93,13 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
     def message(self, cid=10, *, bot=False, text="edited", webhook_id=None):
         now = datetime.now(UTC)
         return SimpleNamespace(
-            id=555, channel=self.channels.get(cid, SimpleNamespace(id=cid)),
+            id=555,
+            channel=self.channels.get(cid, SimpleNamespace(id=cid)),
             author=SimpleNamespace(bot=bot, id=5, display_name="Human"),
-            content=text, created_at=now, edited_at=now, webhook_id=webhook_id,
+            content=text,
+            created_at=now,
+            edited_at=now,
+            webhook_id=webhook_id,
         )
 
     def thread(self, cid, parent):
@@ -127,9 +138,14 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
         self.thread(11, 10)
         await self.bot.on_message_edit(self.message(11, text="A"), self.message(11, text="B"))
         self.assertEqual(len(self.events), 1)
-        self.assertEqual(self.events[0]["thread"], {
-            "id": "11", "name": "thread-11", "parent_channel_id": "10",
-        })
+        self.assertEqual(
+            self.events[0]["thread"],
+            {
+                "id": "11",
+                "name": "thread-11",
+                "parent_channel_id": "10",
+            },
+        )
 
     async def test_edit_from_bot_or_unregistered_channel_is_ignored(self):
         self.channel()
@@ -174,14 +190,24 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
         message.edit = AsyncMock(return_value=edited)
         channel.fetch_message = AsyncMock(return_value=message)
 
-        response = await self.client.patch("/messages/555", json={
-            "channel_id": 10, "text": "fixed",
-        })
+        response = await self.client.patch(
+            "/messages/555",
+            json={
+                "channel_id": 10,
+                "text": "fixed",
+            },
+        )
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual(body, {
-            "id": "555", "channel_id": "10", "edited_at": body["edited_at"], "via": "bot",
-        })
+        self.assertEqual(
+            body,
+            {
+                "id": "555",
+                "channel_id": "10",
+                "edited_at": body["edited_at"],
+                "via": "bot",
+            },
+        )
         message.edit.assert_awaited_once_with(content="fixed")
 
     async def test_patch_edits_webhook_sent_message_via_registration(self):
@@ -190,9 +216,13 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
         channel.fetch_message = AsyncMock(return_value=message)
         edited = self.message(text="fixed")
         with patch("discord.Webhook.edit_message", new=AsyncMock(return_value=edited)) as edit:
-            response = await self.client.patch("/messages/555", json={
-                "channel_id": 10, "text": "fixed",
-            })
+            response = await self.client.patch(
+                "/messages/555",
+                json={
+                    "channel_id": 10,
+                    "text": "fixed",
+                },
+            )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["via"], "webhook")
         edit.assert_awaited_once_with(555, content="fixed")
@@ -201,17 +231,29 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
         channel = self.channel()
         human_message = self.message()  # author id 5, no webhook -> not ours
         channel.fetch_message = AsyncMock(return_value=human_message)
-        response = await self.client.patch("/messages/555", json={
-            "channel_id": 10, "text": "hijack",
-        })
+        response = await self.client.patch(
+            "/messages/555",
+            json={
+                "channel_id": 10,
+                "text": "hijack",
+            },
+        )
         self.assertEqual(response.status_code, 403)
-        response = await self.client.patch("/messages/555", json={
-            "channel_id": 10, "text": "   ",
-        })
+        response = await self.client.patch(
+            "/messages/555",
+            json={
+                "channel_id": 10,
+                "text": "   ",
+            },
+        )
         self.assertEqual(response.status_code, 422)
-        response = await self.client.patch("/messages/555", json={
-            "channel_id": 10, "text": "x" * 2001,
-        })
+        response = await self.client.patch(
+            "/messages/555",
+            json={
+                "channel_id": 10,
+                "text": "x" * 2001,
+            },
+        )
         self.assertEqual(response.status_code, 422)
 
     async def test_patch_unknown_message_and_channel(self):
@@ -222,13 +264,21 @@ class MessageEditTests(unittest.IsolatedAsyncioTestCase):
         channel.fetch_message = AsyncMock(
             side_effect=discord.NotFound(response, {"message": "Unknown Message"})
         )
-        response = await self.client.patch("/messages/555", json={
-            "channel_id": 10, "text": "fixed",
-        })
+        response = await self.client.patch(
+            "/messages/555",
+            json={
+                "channel_id": 10,
+                "text": "fixed",
+            },
+        )
         self.assertEqual(response.status_code, 404)
-        response = await self.client.patch("/messages/555", json={
-            "channel_id": 99, "text": "fixed",
-        })
+        response = await self.client.patch(
+            "/messages/555",
+            json={
+                "channel_id": 99,
+                "text": "fixed",
+            },
+        )
         self.assertEqual(response.status_code, 404)
 
 

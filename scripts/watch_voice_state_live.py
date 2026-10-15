@@ -9,6 +9,7 @@ registration is removed on exit.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
 
 import httpx
@@ -33,12 +34,15 @@ async def main() -> None:
     await web.TCPSite(runner, "127.0.0.1", CALLBACK_PORT).start()
 
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=10) as http:
-        resp = await http.post("/registrations", json={
-            "channel_id": LAB_TEXT_CHANNEL_ID,
-            "callback_url": CALLBACK_URL,
-            "display_name": "lab-voice-events-test",
-            "voice_events": True,
-        })
+        resp = await http.post(
+            "/registrations",
+            json={
+                "channel_id": LAB_TEXT_CHANNEL_ID,
+                "callback_url": CALLBACK_URL,
+                "display_name": "lab-voice-events-test",
+                "voice_events": True,
+            },
+        )
         print("register:", resp.status_code, flush=True)
         if resp.status_code == 409:
             print("lab-text already registered — deregister it first", flush=True)
@@ -54,7 +58,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
-    except KeyboardInterrupt:
-        pass

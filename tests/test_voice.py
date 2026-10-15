@@ -1,9 +1,10 @@
 """Offline tests for voice ownership (ADR 0005). No real voice connection."""
+
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import discord
 import httpx
@@ -39,8 +40,12 @@ class VoiceOwnershipTests(unittest.IsolatedAsyncioTestCase):
         self.channel.id, self.channel.guild = 55, SimpleNamespace(id=1)
         self.channel.connect = AsyncMock(return_value=self.vc)
         self.text = Mock(spec=discord.TextChannel)
-        self.bot.get_channel = Mock(side_effect=lambda cid: {55: self.channel, 56: self.text}.get(cid))
-        self.bot.fetch_channel = AsyncMock(side_effect=lambda cid: {55: self.channel, 56: self.text}[cid])
+        self.bot.get_channel = Mock(
+            side_effect=lambda cid: {55: self.channel, 56: self.text}.get(cid)
+        )
+        self.bot.fetch_channel = AsyncMock(
+            side_effect=lambda cid: {55: self.channel, 56: self.text}[cid]
+        )
 
     async def join(self, owner=A, cid=55):
         return await self.client_http.post("/voice/join", json={"channel_id": cid, "owner": owner})
@@ -84,13 +89,19 @@ class VoiceOwnershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_leave_requires_owner(self):
         await self.join()
-        self.assertEqual((await self.client_http.post("/voice/leave", json={"owner": B})).status_code, 403)
-        self.assertEqual((await self.client_http.post("/voice/leave", json={"owner": A})).status_code, 204)
+        self.assertEqual(
+            (await self.client_http.post("/voice/leave", json={"owner": B})).status_code, 403
+        )
+        self.assertEqual(
+            (await self.client_http.post("/voice/leave", json={"owner": A})).status_code, 204
+        )
         self.vc.disconnect.assert_awaited_once()
         self.assertEqual((await self.client_http.get("/voice/status")).json()["connected"], False)
 
     async def test_leave_without_connection_404(self):
-        self.assertEqual((await self.client_http.post("/voice/leave", json={"owner": A})).status_code, 404)
+        self.assertEqual(
+            (await self.client_http.post("/voice/leave", json={"owner": A})).status_code, 404
+        )
 
     async def test_freed_connection_can_be_claimed_by_another_owner(self):
         await self.join()
@@ -102,9 +113,18 @@ class VoiceOwnershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_play_requires_owner_and_body(self):
         await self.join()
-        self.assertEqual((await self.client_http.post("/voice/play?owner=" + B, content=b"x" * 3840)).status_code, 403)
-        self.assertEqual((await self.client_http.post("/voice/play?owner=" + A, content=b"")).status_code, 422)
-        self.assertEqual((await self.client_http.post("/voice/play", content=b"x" * 3840)).status_code, 422)
+        self.assertEqual(
+            (
+                await self.client_http.post("/voice/play?owner=" + B, content=b"x" * 3840)
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            (await self.client_http.post("/voice/play?owner=" + A, content=b"")).status_code, 422
+        )
+        self.assertEqual(
+            (await self.client_http.post("/voice/play", content=b"x" * 3840)).status_code, 422
+        )
         response = await self.client_http.post("/voice/play?owner=" + A, content=b"x" * 3840)
         self.assertEqual(response.status_code, 202)
         self.vc.play.assert_called_once()
@@ -118,8 +138,12 @@ class VoiceOwnershipTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stop_requires_owner(self):
         await self.join()
-        self.assertEqual((await self.client_http.post("/voice/stop", json={"owner": B})).status_code, 403)
-        self.assertEqual((await self.client_http.post("/voice/stop", json={"owner": A})).status_code, 204)
+        self.assertEqual(
+            (await self.client_http.post("/voice/stop", json={"owner": B})).status_code, 403
+        )
+        self.assertEqual(
+            (await self.client_http.post("/voice/stop", json={"owner": A})).status_code, 204
+        )
 
     async def test_play_without_connection_404(self):
         response = await self.client_http.post("/voice/play?owner=" + A, content=b"x" * 3840)

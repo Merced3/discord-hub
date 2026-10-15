@@ -3,6 +3,7 @@
 No real .env, token, or Discord. Discord operations are mocked.
 Run: python -m unittest discover -s tests -v
 """
+
 from __future__ import annotations
 
 import unittest
@@ -15,13 +16,13 @@ import discord
 import httpx
 
 from discord_hub.api import create_api
-from discord_hub.capabilities import tier_limit
-
-BASE_CAP = tier_limit(0, "attachment_bytes")
 from discord_hub.bot import HubBot
+from discord_hub.capabilities import tier_limit
 from discord_hub.commands import CommandStore
 from discord_hub.config import Settings
 from discord_hub.registry import Registration, Registry
+
+BASE_CAP = tier_limit(0, "attachment_bytes")
 
 
 class AttachmentTests(unittest.IsolatedAsyncioTestCase):
@@ -30,7 +31,9 @@ class AttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp.cleanup)
         settings = Settings(_env_file=None, discord_token="fake-token", discord_guild_id=1)
         self.registry = Registry(Path(self.temp.name) / "registrations.json")
-        self.bot = HubBot(settings, self.registry, CommandStore(Path(self.temp.name) / "commands.json"))
+        self.bot = HubBot(
+            settings, self.registry, CommandStore(Path(self.temp.name) / "commands.json")
+        )
         self.bot._http = aiohttp.ClientSession()
         self.addAsyncCleanup(self.bot._http.close)
         self.client = httpx.AsyncClient(

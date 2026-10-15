@@ -56,7 +56,8 @@ def _wrap_decrypt_rtp(original):
             else:
                 log.warning(
                     "invalid RTP padding (count=%d, payload=%d bytes); dropping payload",
-                    pad, len(data),
+                    pad,
+                    len(data),
                 )
                 data = b""
         return data

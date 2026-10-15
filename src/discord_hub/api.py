@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import asdict
-from typing import Any
 
 import discord
-import logging
-
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
-
-logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 
 from .bot import HubBot
 from .commands import CommandNameTakenError, CommandSpec
 from .registry import ChannelTakenError
 from .voice import NotVoiceOwnerError, StreamTakenError, VoiceBusyError
+
+logger = logging.getLogger(__name__)
 
 
 class SendMessageRequest(BaseModel):
@@ -121,13 +119,13 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
     @app.post("/messages", status_code=201)
     async def send_message(body: SendMessageRequest) -> dict:
         try:
-            return await bot.send_message(
-                body.channel_id, body.text, body.reply_to_message_id
-            )
+            return await bot.send_message(body.channel_id, body.text, body.reply_to_message_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except discord.Forbidden as exc:
-            raise HTTPException(status_code=403, detail="Bot lacks permission in that channel") from exc
+            raise HTTPException(
+                status_code=403, detail="Bot lacks permission in that channel"
+            ) from exc
 
     @app.patch("/messages/{message_id}")
     async def edit_message(message_id: int, body: EditMessageRequest) -> dict:
@@ -141,11 +139,15 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except discord.NotFound as exc:
-            raise HTTPException(status_code=404, detail="Message not found in that channel") from exc
+            raise HTTPException(
+                status_code=404, detail="Message not found in that channel"
+            ) from exc
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.Forbidden as exc:
-            raise HTTPException(status_code=403, detail="Bot lacks permission in that channel") from exc
+            raise HTTPException(
+                status_code=403, detail="Bot lacks permission in that channel"
+            ) from exc
 
     @app.post("/messages/attachments", status_code=201)
     async def send_attachment(request: Request) -> dict:
@@ -170,11 +172,17 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             logger.warning(
                 "attachment rejected: %r for channel %s is %d bytes, over the %d-byte "
                 "cap (server boost tier %d)",
-                filename, channel_id, len(data), cap, bot.server_tier(),
+                filename,
+                channel_id,
+                len(data),
+                cap,
+                bot.server_tier(),
             )
             raise HTTPException(
                 status_code=413,
-                detail=f"file too big: {len(data)} bytes exceeds the {cap // (1024 * 1024)} MiB cap",
+                detail=(
+                    f"file too big: {len(data)} bytes exceeds the {cap // (1024 * 1024)} MiB cap"
+                ),
             )
         try:
             return await bot.send_attachment(int(channel_id), filename, data, text)
@@ -183,7 +191,9 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except discord.Forbidden as exc:
-            raise HTTPException(status_code=403, detail="Bot lacks permission in that channel") from exc
+            raise HTTPException(
+                status_code=403, detail="Bot lacks permission in that channel"
+            ) from exc
 
     @app.post("/threads", status_code=201)
     async def create_thread(body: CreateThreadRequest) -> dict:
@@ -205,7 +215,9 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except (PermissionError, discord.Forbidden) as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.HTTPException as exc:
-            raise HTTPException(status_code=502, detail="Discord could not complete thread deletion") from exc
+            raise HTTPException(
+                status_code=502, detail="Discord could not complete thread deletion"
+            ) from exc
         return Response(status_code=204)
 
     @app.get("/forums/{channel_id}/posts")
@@ -221,14 +233,14 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except (PermissionError, discord.Forbidden) as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.HTTPException as exc:
-            raise HTTPException(status_code=502, detail="Discord could not list forum posts") from exc
+            raise HTTPException(
+                status_code=502, detail="Discord could not list forum posts"
+            ) from exc
 
     @app.post("/forums/{channel_id}/posts", status_code=201)
     async def create_forum_post(channel_id: int, body: CreateForumPostRequest) -> dict:
         try:
-            return await bot.create_forum_post(
-                channel_id, body.title, body.text, body.tag_ids
-            )
+            return await bot.create_forum_post(channel_id, body.title, body.text, body.tag_ids)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except LookupError as exc:
@@ -236,7 +248,9 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except (PermissionError, discord.Forbidden) as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.HTTPException as exc:
-            raise HTTPException(status_code=502, detail="Discord could not create the post") from exc
+            raise HTTPException(
+                status_code=502, detail="Discord could not create the post"
+            ) from exc
 
     @app.patch("/forums/posts/{post_id}")
     async def update_forum_post(post_id: int, body: UpdateForumPostRequest) -> dict:
@@ -251,7 +265,9 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except (PermissionError, discord.Forbidden) as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.HTTPException as exc:
-            raise HTTPException(status_code=502, detail="Discord could not update the post") from exc
+            raise HTTPException(
+                status_code=502, detail="Discord could not update the post"
+            ) from exc
 
     @app.post("/forums/{channel_id}/tags", status_code=201)
     async def create_forum_tag(channel_id: int, body: CreateForumTagRequest) -> dict:
@@ -265,9 +281,7 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(status_code=502, detail="Discord could not create the tag") from exc
 
     @app.patch("/forums/{channel_id}/tags/{tag_id}")
-    async def update_forum_tag(
-        channel_id: int, tag_id: int, body: UpdateForumTagRequest
-    ) -> dict:
+    async def update_forum_tag(channel_id: int, tag_id: int, body: UpdateForumTagRequest) -> dict:
         try:
             return await bot.update_forum_tag(channel_id, tag_id, body.name, body.moderated)
         except ValueError as exc:
@@ -300,11 +314,14 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except (PermissionError, discord.Forbidden) as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.HTTPException as exc:
-            raise HTTPException(status_code=502, detail="Discord could not read the forum post") from exc
+            raise HTTPException(
+                status_code=502, detail="Discord could not read the forum post"
+            ) from exc
 
     @app.get("/channels/{channel_id}/history")
     async def channel_history(
-        channel_id: int, limit: int = Query(default=50, ge=1, le=100),
+        channel_id: int,
+        limit: int = Query(default=50, ge=1, le=100),
         before: int | None = Query(default=None, gt=0),
     ) -> dict:
         try:
@@ -314,7 +331,9 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except (PermissionError, discord.Forbidden) as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except discord.HTTPException as exc:
-            raise HTTPException(status_code=502, detail="Discord could not read channel history") from exc
+            raise HTTPException(
+                status_code=502, detail="Discord could not read channel history"
+            ) from exc
 
     @app.post("/channels/{channel_id}/typing", status_code=202)
     async def trigger_typing(channel_id: int) -> Response:
@@ -370,9 +389,15 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
     async def register(body: RegisterRequest) -> dict:
         try:
             reg = await bot.register(
-                body.channel_id, body.callback_url, body.display_name, body.avatar_url,
-                body.allow_thread_deletion, body.voice_events, body.reaction_events,
-                body.allow_forum_moderation, body.forum_events,
+                body.channel_id,
+                body.callback_url,
+                body.display_name,
+                body.avatar_url,
+                body.allow_thread_deletion,
+                body.voice_events,
+                body.reaction_events,
+                body.allow_forum_moderation,
+                body.forum_events,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

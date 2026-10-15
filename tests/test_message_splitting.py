@@ -1,4 +1,5 @@
 """Offline tests for markdown-aware, lossless message splitting (_chunks)."""
+
 from __future__ import annotations
 
 import random
@@ -15,11 +16,11 @@ def assert_lossless(case: unittest.TestCase, text: str, limit: int) -> list[str]
     meta = _chunks_with_meta(text, limit)
     chunks = [c for c, _, _ in meta]
     case.assertTrue(chunks and all(chunks), "no empty chunks allowed")
-    case.assertTrue(all(len(c) <= limit for c in chunks),
-                    f"oversize: {[len(c) for c in chunks]} (limit {limit})")
-    rejoined = "".join(
-        c[len(pre) : len(c) - len(suf) if suf else None] for c, pre, suf in meta
+    case.assertTrue(
+        all(len(c) <= limit for c in chunks),
+        f"oversize: {[len(c) for c in chunks]} (limit {limit})",
     )
+    rejoined = "".join(c[len(pre) : len(c) - len(suf) if suf else None] for c, pre, suf in meta)
     case.assertEqual(rejoined, text.strip() or "(No text response.)")
     case.assertEqual(chunks, _chunks(text, limit), "_chunks must wrap the meta variant")
     return chunks
@@ -31,7 +32,9 @@ class MessageSplittingTests(unittest.TestCase):
         text = (
             "7. **Media multitasking / screen distraction**\n"
             "   - Work by **Sana, Weston, & Cepeda (2013)** and related studies.\n"
-            + "   - " + "filler text to push the break. " * 55 + "\n"
+            + "   - "
+            + "filler text to push the break. " * 55
+            + "\n"
             "   - This is often what people loosely mean when they say screen time is bad."
         )
         for c in assert_lossless(self, text, _MESSAGE_LIMIT):
@@ -43,7 +46,8 @@ class MessageSplittingTests(unittest.TestCase):
         bold = assert_lossless(self, "**" + "bold words " * 300 + "**", _MESSAGE_LIMIT)
         self.assertTrue(bold[0].endswith("**") and bold[1].startswith("**"))
         fence = assert_lossless(
-            self, "Intro:\n```python\n" + "x = f()\n" * 300 + "```\nAfter.", _MESSAGE_LIMIT)
+            self, "Intro:\n```python\n" + "x = f()\n" * 300 + "```\nAfter.", _MESSAGE_LIMIT
+        )
         self.assertTrue(fence[0].endswith("\n```") and fence[1].startswith("```python\n"))
         spoiler = assert_lossless(self, "||" + "secret " * 400 + "||", _MESSAGE_LIMIT)
         self.assertTrue(spoiler[0].endswith("||") and spoiler[1].startswith("||"))
@@ -58,8 +62,11 @@ class MessageSplittingTests(unittest.TestCase):
 
     def test_lists_split_sensibly(self):
         # paragraph gap near the limit: list stays intact in chunk 1
-        text = ("Key points:\n- alpha\n- beta\n- gamma\n\n"
-                + " ".join(["wrapping"] * 12) + "\n\n- delta\n- epsilon")
+        text = (
+            "Key points:\n- alpha\n- beta\n- gamma\n\n"
+            + " ".join(["wrapping"] * 12)
+            + "\n\n- delta\n- epsilon"
+        )
         chunks = assert_lossless(self, text, 80)
         self.assertIn("- alpha", chunks[0])
         self.assertIn("- gamma", chunks[0])
@@ -74,8 +81,9 @@ class MessageSplittingTests(unittest.TestCase):
         for _ in range(50):
             parts = [rng.choice(alphabet) for _ in range(rng.randint(0, 600))]
             for _ in range(rng.randint(0, 4)):
-                parts.insert(rng.randint(0, len(parts)),
-                             rng.choice(["```", "```python", "**", "||", "~~"]))
+                parts.insert(
+                    rng.randint(0, len(parts)), rng.choice(["```", "```python", "**", "||", "~~"])
+                )
             limit = rng.choice([20, 50, 100, 500, 1900])
             with self.subTest(limit=limit):
                 assert_lossless(self, "".join(parts), limit)

@@ -1,9 +1,10 @@
 """Offline safety/contract tests for deletion and paginated history."""
+
+import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest.mock import AsyncMock, Mock
 
 import discord
@@ -39,10 +40,13 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.client.aclose)
 
     def opt_in(self, channel_id: int = 10, flag: bool = True) -> None:
-        self.registry.add(Registration(
-            channel_id=channel_id, callback_url="http://127.0.0.1:9/cb",
-            allow_thread_deletion=flag,
-        ))
+        self.registry.add(
+            Registration(
+                channel_id=channel_id,
+                callback_url="http://127.0.0.1:9/cb",
+                allow_thread_deletion=flag,
+            )
+        )
 
     async def test_deletion_refused_when_parent_not_opted_in(self):
         self.opt_in(flag=False)
@@ -86,7 +90,8 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
     async def test_discord_deletion_errors_have_explicit_statuses(self):
         self.opt_in()
         for error_cls, status, expected in [
-            (discord.Forbidden, 403, 403), (discord.NotFound, 404, 404),
+            (discord.Forbidden, 403, 403),
+            (discord.NotFound, 404, 404),
             (discord.HTTPException, 500, 502),
         ]:
             with self.subTest(status=status):
@@ -98,12 +103,20 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
     def install_history(self):
         def message(mid):
             return SimpleNamespace(
-                id=mid, author=SimpleNamespace(id=7, display_name="User", bot=False),
-                created_at=datetime(2026, 1, 1, tzinfo=UTC), edited_at=None,
-                content=f"message-{mid}", attachments=[SimpleNamespace(
-                    id=8, filename="note.txt", size=3, content_type="text/plain",
-                    url="https://example.invalid/attachment",
-                )],
+                id=mid,
+                author=SimpleNamespace(id=7, display_name="User", bot=False),
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                edited_at=None,
+                content=f"message-{mid}",
+                attachments=[
+                    SimpleNamespace(
+                        id=8,
+                        filename="note.txt",
+                        size=3,
+                        content_type="text/plain",
+                        url="https://example.invalid/attachment",
+                    )
+                ],
             )
 
         async def history(*, limit, before, oldest_first):
@@ -113,6 +126,7 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
                         break
                     yield message(mid)
                     limit -= 1
+
         self.thread.history = Mock(side_effect=history)
 
     async def test_history_pagination_is_newest_first_and_exclusive(self):
@@ -137,7 +151,9 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
     async def test_history_rejects_invalid_bounds_before_discord_access(self):
         for query in ["limit=0", "limit=101", "before=0", "before=not-an-id"]:
             with self.subTest(query=query):
-                self.assertEqual((await self.client.get(f"/channels/11/history?{query}")).status_code, 422)
+                self.assertEqual(
+                    (await self.client.get(f"/channels/11/history?{query}")).status_code, 422
+                )
         self.bot.get_channel.assert_not_called()
 
     async def test_history_requires_configured_server_and_read_permissions(self):
@@ -160,4 +176,6 @@ class ChannelOperationsTests(unittest.IsolatedAsyncioTestCase):
                 self.bot.fetch_channel.side_effect = error_cls(
                     SimpleNamespace(status=status, reason="fake"), {"message": "fake", "code": 0}
                 )
-                self.assertEqual((await self.client.get("/channels/11/history")).status_code, status)
+                self.assertEqual(
+                    (await self.client.get("/channels/11/history")).status_code, status
+                )

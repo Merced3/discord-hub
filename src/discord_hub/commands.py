@@ -82,6 +82,7 @@ class CommandStore:
                 raise CommandNameTakenError(
                     f"command name(s) already owned by {url}: {', '.join(sorted(clash))}"
                 )
+
     def set_project_commands(self, callback_url: str, specs: list[CommandSpec]) -> None:
         """Replace a project's set after validation and successful Discord sync."""
         self.validate_project_commands(callback_url, specs)
@@ -139,6 +140,4 @@ def build_command(
     described = app_commands.describe(
         **{o["name"]: o.get("description", "") for o in spec.options}
     )(callback)
-    return app_commands.Command(
-        name=spec.name, description=spec.description, callback=described
-    )
+    return app_commands.Command(name=spec.name, description=spec.description, callback=described)

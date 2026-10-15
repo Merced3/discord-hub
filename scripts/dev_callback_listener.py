@@ -6,6 +6,7 @@ hub itself; run it only while testing:
 
     .venv/Scripts/python scripts/dev_callback_listener.py
 """
+
 from __future__ import annotations
 
 import json

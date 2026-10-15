@@ -3,7 +3,7 @@
 No real voice connection: the voice client is mocked. Websocket tests run
 through starlette's TestClient against the real FastAPI app.
 """
-import asyncio
+
 import base64
 import unittest
 from pathlib import Path
@@ -18,7 +18,7 @@ from discord_hub.bot import HubBot
 from discord_hub.commands import CommandStore
 from discord_hub.config import Settings
 from discord_hub.registry import Registry
-from discord_hub.voice import StreamAudioSource, VoiceStream, _PCM_FRAME_BYTES
+from discord_hub.voice import _PCM_FRAME_BYTES, StreamAudioSource
 
 A, B = "http://localhost:9001/cb", "http://localhost:9002/cb"
 
@@ -132,9 +132,7 @@ class StreamApiTests(unittest.TestCase):
             stream.on_speaking_start(bot_member)
             stream.on_speaking_start(human)
             event = ws.receive_json()
-            self.assertEqual(
-                event, {"type": "speaking", "user_id": "7", "state": "started"}
-            )
+            self.assertEqual(event, {"type": "speaking", "user_id": "7", "state": "started"})
             stream.on_speaking_stop(human)
             event = ws.receive_json()
             self.assertEqual(event["state"], "stopped")

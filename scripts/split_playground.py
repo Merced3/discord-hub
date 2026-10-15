@@ -103,9 +103,9 @@ def _wrappers(state: _MdState) -> tuple[str, str]:
 
 @dataclass
 class Chunk:
-    text: str           # what Discord would receive
-    added_prefix: str   # synthetic reopeners (not part of the original)
-    added_suffix: str   # synthetic closers
+    text: str  # what Discord would receive
+    added_prefix: str  # synthetic reopeners (not part of the original)
+    added_suffix: str  # synthetic closers
 
 
 def _find_break(window: str, min_len: int = 1) -> int:
@@ -195,13 +195,16 @@ def verify_lossless(original: str, limit: int = DEFAULT_LIMIT) -> bool:
 
 # ---------------------------------------------------------------- selftest --
 
+
 def _selftest() -> int:
-    long_word = "supercalifragilistic" * 200          # ~4000 chars, no spaces
+    long_word = "supercalifragilistic" * 200  # ~4000 chars, no spaces
     cases: dict[str, str] = {
         "the 'mean' bug": (
             "7. **Media multitasking / screen distraction**\n"
             "   - Work by **Sana, Weston, & Cepeda (2013)** and related studies.\n"
-            + "   - " + "filler text to push the break. " * 55 + "\n"
+            + "   - "
+            + "filler text to push the break. " * 55
+            + "\n"
             "   - This is often what people loosely mean when they say screen time is bad."
         ),
         "bold spanning a break": "**" + "bold words " * 300 + "**",
@@ -225,8 +228,9 @@ def _selftest() -> int:
         ok = verify_lossless(text)
         status = "PASS" if ok else "FAIL"
         failures += 0 if ok else 1
-        print(f"[{status}] {name:<32} -> {len(chunks)} chunk(s), "
-              f"lens {[len(c.text) for c in chunks]}")
+        print(
+            f"[{status}] {name:<32} -> {len(chunks)} chunk(s), lens {[len(c.text) for c in chunks]}"
+        )
         if not ok:
             for i, c in enumerate(chunks):
                 print(f"  chunk {i}: {c.text[:80]!r} ... {c.text[-80:]!r}")
@@ -260,9 +264,11 @@ def _selftest() -> int:
 
 # -------------------------------------------------------------------- main --
 
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("file", nargs="?", help="text file to split ('-' for stdin)")
     ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     ap.add_argument("--selftest", action="store_true", help="run the built-in suite")
@@ -271,7 +277,11 @@ def main() -> int:
     if args.selftest or not args.file:
         return _selftest()
 
-    text = sys.stdin.read() if args.file == "-" else open(args.file, encoding="utf-8").read()
+    if args.file == "-":
+        text = sys.stdin.read()
+    else:
+        with open(args.file, encoding="utf-8") as f:
+            text = f.read()
     chunks = chunks_with_meta(text, args.limit)
     print(f"input: {len(text.strip())} chars -> {len(chunks)} chunk(s), limit {args.limit}")
     print(f"lossless round-trip: {'YES' if verify_lossless(text, args.limit) else 'NO'}")

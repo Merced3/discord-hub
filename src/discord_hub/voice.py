@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import collections
+import contextlib
 import io
 import logging
 import time
@@ -83,7 +84,7 @@ class VoiceSession:
     owner: str
     channel_id: int
     client: voice_recv.VoiceRecvClient
-    stream: "VoiceStream | None" = None
+    stream: VoiceStream | None = None
 
 
 class VoiceStream:
@@ -106,26 +107,26 @@ class VoiceStream:
     def _enqueue(self, event: dict) -> None:
         def put() -> None:
             if self.events.full():
-                try:
+                with contextlib.suppress(asyncio.QueueEmpty):
                     self.events.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-            try:
+            with contextlib.suppress(asyncio.QueueFull):
                 self.events.put_nowait(event)
-            except asyncio.QueueFull:
-                pass
 
         self._loop.call_soon_threadsafe(put)
 
-    def on_audio(self, user: discord.User | discord.Member | None, data: voice_recv.VoiceData) -> None:
+    def on_audio(
+        self, user: discord.User | discord.Member | None, data: voice_recv.VoiceData
+    ) -> None:
         if data.pcm is None or user is None or user.bot:
             return
-        self._enqueue({
-            "type": "audio",
-            "user_id": str(user.id),
-            "pcm": base64.b64encode(data.pcm).decode("ascii"),
-            "timestamp": time.time(),
-        })
+        self._enqueue(
+            {
+                "type": "audio",
+                "user_id": str(user.id),
+                "pcm": base64.b64encode(data.pcm).decode("ascii"),
+                "timestamp": time.time(),
+            }
+        )
 
     def on_speaking_start(self, member: discord.Member) -> None:
         if member.bot:
@@ -172,10 +173,8 @@ class VoiceStream:
             self._client.stop_listening()
         except Exception:
             logger.warning("stop_listening failed during stream close", exc_info=True)
-        try:
+        with contextlib.suppress(Exception):
             self._client.stop()
-        except Exception:
-            pass
         self.outbound.cleanup()
 
 
@@ -202,9 +201,7 @@ class VoiceManager:
         async with self._lock:
             if self._session is not None and self._session.client.is_connected():
                 if self._session.owner != owner:
-                    raise VoiceBusyError(
-                        f"voice connection is owned by {self._session.owner}"
-                    )
+                    raise VoiceBusyError(f"voice connection is owned by {self._session.owner}")
                 if self._session.channel_id != channel.id:
                     await self._session.client.move_to(channel)
                     self._session.channel_id = channel.id

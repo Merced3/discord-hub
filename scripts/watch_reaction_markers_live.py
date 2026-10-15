@@ -15,6 +15,7 @@ Default channel: LAB's lab-text. Stop with Ctrl+C (deregisters on exit).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import sys
 
@@ -43,15 +44,21 @@ async def main() -> None:
     callback_url = f"http://{CALLBACK_HOST}:{CALLBACK_PORT}/discord"
 
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=10) as http:
-        resp = await http.post("/registrations", json={
-            "channel_id": channel_id,
-            "callback_url": callback_url,
-            "display_name": "marker-watch",
-            "reaction_events": True,
-        })
+        resp = await http.post(
+            "/registrations",
+            json={
+                "channel_id": channel_id,
+                "callback_url": callback_url,
+                "display_name": "marker-watch",
+                "reaction_events": True,
+            },
+        )
         if resp.status_code == 409:
             print(f"channel {channel_id} already registered to another project —")
-            print("deregister it first (DELETE /registrations/{channel_id}) or pass a different channel_id")
+            print(
+                "deregister it first (DELETE /registrations/{channel_id})"
+                " or pass a different channel_id"
+            )
             return
         resp.raise_for_status()
         print(f"registered channel {channel_id} with reaction_events=true", flush=True)
@@ -65,7 +72,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(main())
-    except KeyboardInterrupt:
-        pass

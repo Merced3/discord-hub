@@ -2,11 +2,12 @@
 
 Discord operations are mocked; callback delivery uses real localhost HTTP.
 """
-from pathlib import Path
-from types import SimpleNamespace
-from tempfile import TemporaryDirectory
+
 import unittest
 import unittest.mock
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import aiohttp
 from aiohttp import web
@@ -18,12 +19,19 @@ from discord_hub.registry import Registry
 
 
 def make_event(
-    emoji: str, *, message_id: int = 500, channel_id: int = 42,
-    user_id: int = 7, guild_id: int = 1,
+    emoji: str,
+    *,
+    message_id: int = 500,
+    channel_id: int = 42,
+    user_id: int = 7,
+    guild_id: int = 1,
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        emoji=emoji, message_id=message_id, channel_id=channel_id,
-        user_id=user_id, guild_id=guild_id,
+        emoji=emoji,
+        message_id=message_id,
+        channel_id=channel_id,
+        user_id=user_id,
+        guild_id=guild_id,
     )
 
 
@@ -33,7 +41,9 @@ class ReactionMarkerTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
         settings = Settings(
-            _env_file=None, discord_token="fake", discord_guild_id=1,
+            _env_file=None,
+            discord_token="fake",
+            discord_guild_id=1,
             reaction_markers={"🔄": "belief_change", "🔒": "private"},
         )
         self.registry = Registry(root / "r.json")
@@ -61,10 +71,13 @@ class ReactionMarkerTests(unittest.IsolatedAsyncioTestCase):
     def register(self, channel_id: int, callback_url: str, reaction_events: bool) -> None:
         from discord_hub.registry import Registration
 
-        self.registry.add(Registration(
-            channel_id=channel_id, callback_url=callback_url,
-            reaction_events=reaction_events,
-        ))
+        self.registry.add(
+            Registration(
+                channel_id=channel_id,
+                callback_url=callback_url,
+                reaction_events=reaction_events,
+            )
+        )
 
     async def test_opted_in_project_receives_add_marker(self):
         self.register(10, self.url_a, reaction_events=True)

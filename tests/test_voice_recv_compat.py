@@ -3,6 +3,7 @@
 No Discord connection: the wrapped voice-recv internals are exercised with
 fake packets and stubbed originals.
 """
+
 import unittest
 from types import SimpleNamespace
 
@@ -64,8 +65,10 @@ class PaddingStripTests(unittest.TestCase):
         # The module patches PacketDecryptor methods at import; bound via
         # __init__'s getattr, so new instances must see the wrapper.
         for mode in (
-            "xsalsa20_poly1305", "xsalsa20_poly1305_suffix",
-            "xsalsa20_poly1305_lite", "aead_xchacha20_poly1305_rtpsize",
+            "xsalsa20_poly1305",
+            "xsalsa20_poly1305_suffix",
+            "xsalsa20_poly1305_lite",
+            "aead_xchacha20_poly1305_rtpsize",
         ):
             fn = getattr(reader.PacketDecryptor, "_decrypt_rtp_" + mode)
             self.assertTrue(getattr(fn, "_hub_patched", False), mode)
@@ -73,9 +76,7 @@ class PaddingStripTests(unittest.TestCase):
     def test_apply_is_idempotent(self):
         before = reader.PacketDecryptor._decrypt_rtp_aead_xchacha20_poly1305_rtpsize
         voice_recv_compat.apply_voice_recv_patches()
-        self.assertIs(
-            before, reader.PacketDecryptor._decrypt_rtp_aead_xchacha20_poly1305_rtpsize
-        )
+        self.assertIs(before, reader.PacketDecryptor._decrypt_rtp_aead_xchacha20_poly1305_rtpsize)
 
 
 class ProcessPacketGuardTests(unittest.TestCase):
@@ -110,7 +111,6 @@ class ProcessPacketGuardTests(unittest.TestCase):
 
     def test_fake_packet_passes_through(self):
         # Jitter-buffer gap fill (falsy, no .payload) is legitimate PLC input.
-        packet = opus.PacketDecoder._make_fakepacket  # not needed; build the real one
         fake = _FakeGapPacket()
         original = lambda self, p: "plc"  # noqa: E731
         wrapped = voice_recv_compat._wrap_process_packet(original)

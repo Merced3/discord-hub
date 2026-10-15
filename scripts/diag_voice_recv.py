@@ -9,9 +9,8 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from discord.ext import voice_recv
-
 from _connect import connected_bot, run
+from discord.ext import voice_recv
 
 CHANNEL_ID = int(sys.argv[1]) if len(sys.argv) > 1 else 1554202973784113212
 counts = {"frames": 0, "no_user": 0, "no_pcm": 0}
@@ -37,7 +36,7 @@ async def main() -> None:
             state = getattr(vc, "_connection", None)
             session = getattr(state, "dave_session", None)
             print(
-                f"t={2*(i+1)}s dave_v={getattr(state, 'dave_protocol_version', None)} "
+                f"t={2 * (i + 1)}s dave_v={getattr(state, 'dave_protocol_version', None)} "
                 f"ready={getattr(session, 'ready', None)} frames={counts} "
                 f"ssrc_map={vc._ssrc_to_id}"
             )

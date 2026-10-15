@@ -2,11 +2,12 @@
 
 Discord operations are mocked; callback delivery uses real localhost HTTP.
 """
-from pathlib import Path
-from types import SimpleNamespace
-from tempfile import TemporaryDirectory
+
 import unittest
-from unittest.mock import AsyncMock, Mock
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import aiohttp
 import discord
@@ -51,9 +52,13 @@ class VoiceStateEventTests(unittest.IsolatedAsyncioTestCase):
     def register(self, channel_id: int, callback_url: str, voice_events: bool) -> None:
         from discord_hub.registry import Registration
 
-        self.registry.add(Registration(
-            channel_id=channel_id, callback_url=callback_url, voice_events=voice_events,
-        ))
+        self.registry.add(
+            Registration(
+                channel_id=channel_id,
+                callback_url=callback_url,
+                voice_events=voice_events,
+            )
+        )
 
     @staticmethod
     def voice_state(channel_id: int | None) -> discord.VoiceState:
@@ -62,7 +67,9 @@ class VoiceStateEventTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_opted_in_project_receives_join_event(self):
         self.register(10, self.url_a, voice_events=True)
-        await self.bot.on_voice_state_update(self.member, self.voice_state(None), self.voice_state(55))
+        await self.bot.on_voice_state_update(
+            self.member, self.voice_state(None), self.voice_state(55)
+        )
         self.assertEqual(len(self.received), 1)
         path, payload = self.received[0]
         self.assertEqual(path, "/a")
@@ -73,13 +80,19 @@ class VoiceStateEventTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_project_without_opt_in_gets_nothing(self):
         self.register(10, self.url_a, voice_events=False)
-        await self.bot.on_voice_state_update(self.member, self.voice_state(None), self.voice_state(55))
+        await self.bot.on_voice_state_update(
+            self.member, self.voice_state(None), self.voice_state(55)
+        )
         self.assertEqual(self.received, [])
 
     async def test_move_and_leave_payloads(self):
         self.register(10, self.url_a, voice_events=True)
-        await self.bot.on_voice_state_update(self.member, self.voice_state(55), self.voice_state(56))
-        await self.bot.on_voice_state_update(self.member, self.voice_state(56), self.voice_state(None))
+        await self.bot.on_voice_state_update(
+            self.member, self.voice_state(55), self.voice_state(56)
+        )
+        await self.bot.on_voice_state_update(
+            self.member, self.voice_state(56), self.voice_state(None)
+        )
         self.assertEqual(
             [(p["before_channel_id"], p["after_channel_id"]) for _, p in self.received],
             [("55", "56"), ("56", None)],
@@ -87,20 +100,26 @@ class VoiceStateEventTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mute_toggle_is_not_reported(self):
         self.register(10, self.url_a, voice_events=True)
-        await self.bot.on_voice_state_update(self.member, self.voice_state(55), self.voice_state(55))
+        await self.bot.on_voice_state_update(
+            self.member, self.voice_state(55), self.voice_state(55)
+        )
         self.assertEqual(self.received, [])
 
     async def test_bot_users_are_not_reported(self):
         self.register(10, self.url_a, voice_events=True)
         bot_member = SimpleNamespace(id=8, display_name="jockie", bot=True)
-        await self.bot.on_voice_state_update(bot_member, self.voice_state(None), self.voice_state(55))
+        await self.bot.on_voice_state_update(
+            bot_member, self.voice_state(None), self.voice_state(55)
+        )
         self.assertEqual(self.received, [])
 
     async def test_delivered_once_per_project_not_per_channel(self):
         self.register(10, self.url_a, voice_events=True)
         self.register(11, self.url_a, voice_events=True)
         self.register(12, self.url_b, voice_events=True)
-        await self.bot.on_voice_state_update(self.member, self.voice_state(None), self.voice_state(55))
+        await self.bot.on_voice_state_update(
+            self.member, self.voice_state(None), self.voice_state(55)
+        )
         self.assertEqual(sorted(path for path, _ in self.received), ["/a", "/b"])
 
     async def test_flag_persists_across_registry_reload(self):

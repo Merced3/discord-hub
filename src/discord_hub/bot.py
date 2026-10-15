@@ -122,9 +122,7 @@ def _chunks(text: str, limit: int = _MESSAGE_LIMIT) -> list[str]:
     return [chunk for chunk, _, _ in _chunks_with_meta(text, limit)]
 
 
-def _chunks_with_meta(
-    text: str, limit: int = _MESSAGE_LIMIT
-) -> list[tuple[str, str, str]]:
+def _chunks_with_meta(text: str, limit: int = _MESSAGE_LIMIT) -> list[tuple[str, str, str]]:
     """Like _chunks, but each item is (chunk, added_prefix, added_suffix).
 
     The prefix/suffix are the synthetic reopeners/closers, so tests can
@@ -176,9 +174,7 @@ def _chunks_with_meta(
                 break
             # shrink and re-evaluate (break choice + state may both change);
             # clamp to >= 1: a negative slice would wrap and never converge
-            take = max(
-                len(piece) - (len(pending_prefix) + len(piece) + len(suffix) - limit), 1
-            )
+            take = max(len(piece) - (len(pending_prefix) + len(piece) + len(suffix) - limit), 1)
 
         out.append((pending_prefix + piece + suffix, pending_prefix, suffix))
         pending_prefix = next_prefix
@@ -190,9 +186,7 @@ class HubBot(discord.Client):
     """A minimal Discord client. Features are added here as methods the
     API layer can call, keeping all Discord knowledge in this class."""
 
-    def __init__(
-        self, settings: Settings, registry: Registry, command_store: CommandStore
-    ) -> None:
+    def __init__(self, settings: Settings, registry: Registry, command_store: CommandStore) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
         intents.messages = True
@@ -264,20 +258,19 @@ class HubBot(discord.Client):
             payload["thread"] = thread_info
         try:
             async with self._http.post(
-                reg.callback_url, json=payload,
+                reg.callback_url,
+                json=payload,
                 timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
                 allow_redirects=False,
             ) as resp:
                 if not 200 <= resp.status < 300:
-                    logger.warning(
-                        "delivery to %s failed: HTTP %s", reg.callback_url, resp.status
-                    )
+                    logger.warning("delivery to %s failed: HTTP %s", reg.callback_url, resp.status)
         except (aiohttp.ClientError, TimeoutError):
-            logger.warning("message callback failed for channel %s; not retried", message.channel.id)
+            logger.warning(
+                "message callback failed for channel %s; not retried", message.channel.id
+            )
 
-    async def on_message_edit(
-        self, before: discord.Message, after: discord.Message
-    ) -> None:
+    async def on_message_edit(self, before: discord.Message, after: discord.Message) -> None:
         """Fires only when the pre-edit message is in the local cache;
         on_raw_message_edit covers the rest."""
         await self._route_message_edit(after, before_text=before.content)
@@ -303,9 +296,7 @@ class HubBot(discord.Client):
             return  # deleted or unreadable between the edit and our fetch
         await self._route_message_edit(message, before_text=None)
 
-    async def _route_message_edit(
-        self, message: discord.Message, before_text: str | None
-    ) -> None:
+    async def _route_message_edit(self, message: discord.Message, before_text: str | None) -> None:
         """Deliver every edit to the channel's registered project, like
         on_message. The hub is stateless about edits: each one is its own
         event, so an archiver can replay the full before/after chain."""
@@ -336,7 +327,8 @@ class HubBot(discord.Client):
             payload["thread"] = thread_info
         try:
             async with self._http.post(
-                reg.callback_url, json=payload,
+                reg.callback_url,
+                json=payload,
                 timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
                 allow_redirects=False,
             ) as resp:
@@ -371,20 +363,20 @@ class HubBot(discord.Client):
             "after_channel_id": str(after_id) if after_id else None,
         }
         # Deliver once per project even if it registered several channels.
-        callback_urls = {
-            reg.callback_url for reg in self.registry.all() if reg.voice_events
-        }
+        callback_urls = {reg.callback_url for reg in self.registry.all() if reg.voice_events}
         for callback_url in callback_urls:
             try:
                 async with self._http.post(
-                    callback_url, json=payload,
+                    callback_url,
+                    json=payload,
                     timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
                     allow_redirects=False,
                 ) as resp:
                     if not 200 <= resp.status < 300:
                         logger.warning(
                             "voice-state delivery to %s failed: HTTP %s",
-                            callback_url, resp.status,
+                            callback_url,
+                            resp.status,
                         )
             except (aiohttp.ClientError, TimeoutError):
                 logger.warning("voice-state callback failed for %s; not retried", callback_url)
@@ -407,8 +399,11 @@ class HubBot(discord.Client):
         # sends some emojis with it (\u2764\ufe0f) and config authors won't.
         emoji = str(event.emoji).replace("\ufe0f", "")
         marker = next(
-            (name for key, name in self.settings.reaction_markers.items()
-             if key.replace("\ufe0f", "") == emoji),
+            (
+                name
+                for key, name in self.settings.reaction_markers.items()
+                if key.replace("\ufe0f", "") == emoji
+            ),
             None,
         )
         if marker is None:
@@ -428,21 +423,27 @@ class HubBot(discord.Client):
             "user_id": str(event.user_id),
         }
         # Deliver once per project even if it registered several channels.
-        callback_urls = {
-            reg.callback_url for reg in self.registry.all() if reg.reaction_events
-        }
-        logger.info("reaction marker %s %r (%s) -> %d project(s)", action, str(event.emoji), marker, len(callback_urls))
+        callback_urls = {reg.callback_url for reg in self.registry.all() if reg.reaction_events}
+        logger.info(
+            "reaction marker %s %r (%s) -> %d project(s)",
+            action,
+            str(event.emoji),
+            marker,
+            len(callback_urls),
+        )
         for callback_url in callback_urls:
             try:
                 async with self._http.post(
-                    callback_url, json=payload,
+                    callback_url,
+                    json=payload,
                     timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
                     allow_redirects=False,
                 ) as resp:
                     if not 200 <= resp.status < 300:
                         logger.warning(
                             "reaction-marker delivery to %s failed: HTTP %s",
-                            callback_url, resp.status,
+                            callback_url,
+                            resp.status,
                         )
             except (aiohttp.ClientError, TimeoutError):
                 logger.warning("reaction-marker callback failed for %s; not retried", callback_url)
@@ -452,14 +453,16 @@ class HubBot(discord.Client):
     async def _deliver_forum_event(self, reg: Registration, payload: dict) -> None:
         try:
             async with self._http.post(
-                reg.callback_url, json=payload,
+                reg.callback_url,
+                json=payload,
                 timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
                 allow_redirects=False,
             ) as resp:
                 if not 200 <= resp.status < 300:
                     logger.warning(
                         "forum-event delivery to %s failed: HTTP %s",
-                        reg.callback_url, resp.status,
+                        reg.callback_url,
+                        resp.status,
                     )
         except (aiohttp.ClientError, TimeoutError):
             logger.warning("forum-event callback failed for %s; not retried", reg.channel_id)
@@ -499,8 +502,7 @@ class HubBot(discord.Client):
             changed.append("pinned")
         if not changed:
             return
-        payload = {"type": "forum.post_updated", "changed": changed,
-                   **self._post_summary(after)}
+        payload = {"type": "forum.post_updated", "changed": changed, **self._post_summary(after)}
         payload["forum_channel_id"] = str(after.parent_id)
         await self._deliver_forum_event(reg, payload)
 
@@ -508,9 +510,12 @@ class HubBot(discord.Client):
         reg = self._forum_events_reg(thread)
         if reg is None:
             return
-        payload = {"type": "forum.post_deleted", "id": str(thread.id),
-                   "title": thread.name,
-                   "forum_channel_id": str(thread.parent_id)}
+        payload = {
+            "type": "forum.post_deleted",
+            "id": str(thread.id),
+            "title": thread.name,
+            "forum_channel_id": str(thread.parent_id),
+        }
         await self._deliver_forum_event(reg, payload)
 
     async def on_guild_channel_update(
@@ -528,8 +533,7 @@ class HubBot(discord.Client):
         if before.name != after.name:
             changed.append("name")
         if before_forum is not None and (
-            {t.id for t in before_forum.available_tags}
-            != {t.id for t in after.available_tags}
+            {t.id for t in before_forum.available_tags} != {t.id for t in after.available_tags}
             or [t.name for t in before_forum.available_tags]
             != [t.name for t in after.available_tags]
         ):
@@ -543,9 +547,7 @@ class HubBot(discord.Client):
             "changed": changed,
             "id": str(after.id),
             "name": after.name,
-            "available_tags": [
-                {"id": str(t.id), "name": t.name} for t in after.available_tags
-            ],
+            "available_tags": [{"id": str(t.id), "name": t.name} for t in after.available_tags],
         }
         await self._deliver_forum_event(reg, payload)
 
@@ -629,9 +631,7 @@ class HubBot(discord.Client):
         message = await channel.send(content=text, file=make_file())
         return {"id": str(message.id), "channel_id": str(channel.id), "via": "bot"}
 
-    async def edit_message(
-        self, channel_id: int, message_id: int, text: str
-    ) -> dict:
+    async def edit_message(self, channel_id: int, message_id: int, text: str) -> dict:
         """Edit a message the hub previously sent. Discord only lets us
         edit our own messages: bot-sent ones via Message.edit, webhook-
         sent ones via the project's webhook. Anything else raises
@@ -680,9 +680,7 @@ class HubBot(discord.Client):
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             raise LookupError(f"Channel {channel_id} is not a text channel")
-        thread = await channel.create_thread(
-            name=name, type=discord.ChannelType.public_thread
-        )
+        thread = await channel.create_thread(name=name, type=discord.ChannelType.public_thread)
         return {
             "id": str(thread.id),
             "name": thread.name,
@@ -699,9 +697,7 @@ class HubBot(discord.Client):
             raise PermissionError("Thread is outside the configured server")
         reg = self.registry.get(channel.parent_id)
         if reg is None or not reg.allow_thread_deletion:
-            raise PermissionError(
-                "Thread deletion is not enabled for this channel's registration"
-            )
+            raise PermissionError("Thread deletion is not enabled for this channel's registration")
         # Discord enforces Manage Threads; do not edit permissions automatically.
         await channel.delete(reason="Hub cleanup request in operator-approved parent channel")
         logger.info("deleted thread %s under parent %s", thread_id, channel.parent_id)
@@ -722,23 +718,37 @@ class HubBot(discord.Client):
             raise PermissionError("History requires View Channel and Read Message History")
         messages = []
         async for message in channel.history(
-            limit=limit, before=discord.Object(id=before) if before else None,
+            limit=limit,
+            before=discord.Object(id=before) if before else None,
             oldest_first=False,
         ):
-            messages.append({
-                "id": str(message.id), "channel_id": str(channel_id),
-                "author": {"id": str(message.author.id), "name": message.author.display_name,
-                           "bot": message.author.bot},
-                "created_at": message.created_at.isoformat(),
-                "edited_at": message.edited_at.isoformat() if message.edited_at else None,
-                "text": message.content,
-                "attachments": [{
-                    "id": str(a.id), "filename": a.filename, "size": a.size,
-                    "content_type": a.content_type, "url": a.url,
-                } for a in message.attachments],
-            })
+            messages.append(
+                {
+                    "id": str(message.id),
+                    "channel_id": str(channel_id),
+                    "author": {
+                        "id": str(message.author.id),
+                        "name": message.author.display_name,
+                        "bot": message.author.bot,
+                    },
+                    "created_at": message.created_at.isoformat(),
+                    "edited_at": message.edited_at.isoformat() if message.edited_at else None,
+                    "text": message.content,
+                    "attachments": [
+                        {
+                            "id": str(a.id),
+                            "filename": a.filename,
+                            "size": a.size,
+                            "content_type": a.content_type,
+                            "url": a.url,
+                        }
+                        for a in message.attachments
+                    ],
+                }
+            )
         return {
-            "channel_id": str(channel_id), "messages": messages,
+            "channel_id": str(channel_id),
+            "messages": messages,
             # A full final page may yield an empty next page; no extra fetch just
             # to discover whether an older message exists.
             "next_before": messages[-1]["id"] if len(messages) == limit else None,
@@ -769,7 +779,8 @@ class HubBot(discord.Client):
             "id": str(thread.id),
             "title": thread.name,
             "author": {"id": str(thread.owner_id), "name": thread.owner.display_name}
-            if thread.owner else None,
+            if thread.owner
+            else None,
             "tags": [{"id": str(t.id), "name": t.name} for t in thread.applied_tags],
             "created_at": thread.created_at.isoformat(),
             "comment_count": thread.message_count,
@@ -862,9 +873,7 @@ class HubBot(discord.Client):
         ADR 0004."""
         reg = self.registry.get(forum_id)
         if reg is None or not reg.allow_forum_moderation:
-            raise PermissionError(
-                "Forum moderation is not enabled for this channel's registration"
-            )
+            raise PermissionError("Forum moderation is not enabled for this channel's registration")
         return reg
 
     async def _get_post(self, post_id: int) -> discord.Thread:
@@ -921,9 +930,7 @@ class HubBot(discord.Client):
             raise LookupError(f"Channel {channel_id} is not a forum in the configured server")
         return forum
 
-    async def create_forum_tag(
-        self, channel_id: int, name: str, moderated: bool = False
-    ) -> dict:
+    async def create_forum_tag(self, channel_id: int, name: str, moderated: bool = False) -> dict:
         """Add to the forum's available tag set (caretaker, ADR 0009)."""
         forum = self._get_forum(channel_id)
         self._forum_moderation_reg(channel_id)
@@ -934,8 +941,11 @@ class HubBot(discord.Client):
         return {"id": str(tag.id), "name": tag.name, "moderated": tag.moderated}
 
     async def update_forum_tag(
-        self, channel_id: int, tag_id: int,
-        name: str | None = None, moderated: bool | None = None,
+        self,
+        channel_id: int,
+        tag_id: int,
+        name: str | None = None,
+        moderated: bool | None = None,
     ) -> dict:
         forum = await self._fresh_forum(channel_id)
         self._forum_moderation_reg(channel_id)
@@ -956,9 +966,11 @@ class HubBot(discord.Client):
         tags = [updated if t.id == tag_id else t for t in forum.available_tags]
         await forum.edit(available_tags=tags)
         logger.info("updated tag %s in forum %s", tag_id, channel_id)
-        return {"id": str(tag_id),
-                "name": name if name is not None else tag.name,
-                "moderated": moderated if moderated is not None else tag.moderated}
+        return {
+            "id": str(tag_id),
+            "name": name if name is not None else tag.name,
+            "moderated": moderated if moderated is not None else tag.moderated,
+        }
 
     async def delete_forum_tag(self, channel_id: int, tag_id: int) -> None:
         forum = await self._fresh_forum(channel_id)
@@ -988,8 +1000,13 @@ class HubBot(discord.Client):
         post["body"] = starter.content if starter else None
         if starter is not None:
             post["attachments"] = [
-                {"id": str(a.id), "filename": a.filename, "size": a.size,
-                 "content_type": a.content_type, "url": a.url}
+                {
+                    "id": str(a.id),
+                    "filename": a.filename,
+                    "size": a.size,
+                    "content_type": a.content_type,
+                    "url": a.url,
+                }
                 for a in starter.attachments
             ]
         return post
@@ -1015,9 +1032,7 @@ class HubBot(discord.Client):
         # Normalize discord.py's internal alias to the name Discord users
         # (and projects) actually know.
         granted = sorted(
-            {"read_messages": "view_channel"}.get(name, name)
-            for name, value in perms
-            if value
+            {"read_messages": "view_channel"}.get(name, name) for name, value in perms if value
         )
         return {"channel_id": str(channel_id), "permissions": granted}
 
@@ -1026,11 +1041,9 @@ class HubBot(discord.Client):
     def _rebuild_commands(self) -> None:
         guild = discord.Object(id=self.settings.discord_guild_id)
         self.tree.clear_commands(guild=guild)
-        for callback_url, specs in self.command_store.all().items():
+        for _callback_url, specs in self.command_store.all().items():
             for spec in specs:
-                self.tree.add_command(
-                    build_command(spec, self._invoke_command), guild=guild
-                )
+                self.tree.add_command(build_command(spec, self._invoke_command), guild=guild)
 
     async def set_commands(self, callback_url: str, specs: list[CommandSpec]) -> int:
         # Guild command sync replaces the entire guild set. Serialize updates
@@ -1038,8 +1051,11 @@ class HubBot(discord.Client):
         async with self._commands_lock:
             self.command_store.validate_project_commands(callback_url, specs)
             candidate = {**self.command_store.all(), callback_url: specs}
-            built = [build_command(spec, self._invoke_command)
-                     for project_specs in candidate.values() for spec in project_specs]
+            built = [
+                build_command(spec, self._invoke_command)
+                for project_specs in candidate.values()
+                for spec in project_specs
+            ]
             guild = discord.Object(id=self.settings.discord_guild_id)
             self.tree.clear_commands(guild=guild)
             try:
@@ -1182,17 +1198,28 @@ class HubBot(discord.Client):
     ) -> Registration:
         async with self._registrations_lock:
             return await self._register_channel(
-                channel_id, callback_url, display_name, avatar_url,
-                allow_thread_deletion, voice_events, reaction_events,
-                allow_forum_moderation, forum_events,
+                channel_id,
+                callback_url,
+                display_name,
+                avatar_url,
+                allow_thread_deletion,
+                voice_events,
+                reaction_events,
+                allow_forum_moderation,
+                forum_events,
             )
 
     async def _register_channel(
-        self, channel_id: int, callback_url: str,
-        display_name: str | None, avatar_url: str | None,
-        allow_thread_deletion: bool, voice_events: bool = False,
+        self,
+        channel_id: int,
+        callback_url: str,
+        display_name: str | None,
+        avatar_url: str | None,
+        allow_thread_deletion: bool,
+        voice_events: bool = False,
         reaction_events: bool = False,
-        allow_forum_moderation: bool = False, forum_events: bool = False,
+        allow_forum_moderation: bool = False,
+        forum_events: bool = False,
     ) -> Registration:
         if self.registry.get(channel_id) is not None:
             raise ChannelTakenError(f"channel {channel_id} is already registered")
@@ -1256,11 +1283,14 @@ class HubBot(discord.Client):
                 elif isinstance(ch, discord.ForumChannel):
                     entries.append(
                         {
-                            "id": str(ch.id), "name": ch.name, "type": "forum",
+                            "id": str(ch.id),
+                            "name": ch.name,
+                            "type": "forum",
                             "topic": ch.topic or "",
                             "available_tags": [
                                 {
-                                    "id": str(t.id), "name": t.name,
+                                    "id": str(t.id),
+                                    "name": t.name,
                                     "emoji": str(t.emoji) if t.emoji else None,
                                     "moderated": t.moderated,
                                 }
