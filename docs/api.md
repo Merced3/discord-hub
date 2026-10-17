@@ -445,7 +445,9 @@ allows ~3 seconds):
 - `{ "text": "Interval set.", "ephemeral": true }` → shown as the response
 - `{ "defer": true, "ephemeral": true }` → "thinking..."; follow up later
 
-On callback error/timeout the hub auto-defers so the interaction survives.
+On callback error/timeout the hub answers immediately with an ephemeral
+"this project is unreachable right now" notice (no internals leaked)
+instead of leaving the user staring at a bare defer.
 
 ### `POST /interactions/{interaction_id}/followups`
 Send a follow-up after deferring. Body: `{ "text": "...", "ephemeral": true }`.

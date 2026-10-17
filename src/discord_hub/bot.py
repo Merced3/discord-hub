@@ -1131,12 +1131,15 @@ class HubBot(discord.Client):
         except (TimeoutError, aiohttp.ClientError):
             self.interaction_stats["callback_failed"] += 1
             logger.exception(
-                "interaction %s (/%s) callback to %s failed; auto-deferring",
+                "interaction %s (/%s) callback to %s failed; answering offline notice",
                 interaction_id,
                 spec.name,
                 callback_url,
             )
-            body = {"defer": True}
+            body = {
+                "text": ("⚠️ This project is unreachable right now — try again in a bit."),
+                "ephemeral": True,
+            }
         else:
             self.interaction_stats["delivered"] += 1
             logger.info(

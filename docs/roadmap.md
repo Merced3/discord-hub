@@ -135,9 +135,10 @@ next hub task.
    **hub API key** worth adding (localhost trust model breaks remotely).
    Small-medium ops session.
 5. **Hub-owned message deletion** — tiny; only if a consumer asks again.
-6. **"Project is offline" auto-reply** — when a command callback is
-   unreachable, answer the user with something honest instead of a bare
-   auto-defer. Small quality-of-life item.
+6. ~~**"Project is offline" auto-reply**~~ ✅ done 2026-10-17 — an
+   unreachable command callback now gets an immediate ephemeral
+   "unreachable right now" notice instead of a bare auto-defer.
+   4 offline tests.
 
 ## Explicitly out of scope (for now)
 
