@@ -13,6 +13,9 @@ dependencies = [
     "fastapi>=0.115",
     "pynacl>=1.5",
     "uvicorn>=0.30",
+    # uvicorn needs a websocket implementation to serve WS /voice/stream;
+    # without this package it answers upgrade requests with HTTP 404.
+    "websockets>=12",
     "pydantic-settings>=2.5",
 ]
 
