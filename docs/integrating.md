@@ -90,6 +90,10 @@ idempotent and keeps the hub in sync after restarts.
 - `POST /threads` — create a named thread in your channel.
 - `POST /channels/{id}/typing` — show "typing..." (~10s) while you work.
 - `GET /channels/{id}/permissions` — preflight before promising delivery.
+- `POST /threads/{id}/archive` — archive a thread (optional body:
+  `{"archived": true, "locked": false}`; set `archived: false` to
+  unarchive). Reversible, so no opt-in flag needed — use this to tidy up
+  finished sessions instead of deleting.
 - `DELETE /threads/{id}` — delete a thread. **Only works if your
   registration opted in with `allow_thread_deletion: true`, and you must
   get the owner's confirmation first.** You own your database cleanup;

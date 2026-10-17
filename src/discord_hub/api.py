@@ -34,6 +34,11 @@ class CreateThreadRequest(BaseModel):
     name: str
 
 
+class ArchiveThreadRequest(BaseModel):
+    archived: bool = True
+    locked: bool = False
+
+
 class CreateForumPostRequest(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     text: str = Field(min_length=1)
@@ -219,6 +224,21 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
                 status_code=502, detail="Discord could not complete thread deletion"
             ) from exc
         return Response(status_code=204)
+
+    @app.post("/threads/{thread_id}/archive")
+    async def archive_thread(thread_id: int, body: ArchiveThreadRequest | None = None) -> dict:
+        archived = True if body is None else body.archived
+        locked = False if body is None else body.locked
+        try:
+            return await bot.archive_thread(thread_id, archived=archived, locked=locked)
+        except (LookupError, discord.NotFound) as exc:
+            raise HTTPException(status_code=404, detail="Thread not found or not a thread") from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(
+                status_code=502, detail="Discord could not complete thread archive"
+            ) from exc
 
     @app.get("/forums/{channel_id}/posts")
     async def forum_posts(

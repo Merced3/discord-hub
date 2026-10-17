@@ -79,6 +79,10 @@ next hub task.
 - [x] Read-only newest-first history pages for text channels and threads.
   **11 additional offline safety/contract tests passed (25 total).** Neither
   deletion nor history has been live-tested in this workstream.
+- [x] **Thread archive/unarchive** — `POST /threads/{id}/archive`
+  (optional body `{archived, locked}`; `archived: false` unarchives).
+  Reversible, so no opt-in flag (ADR 0004 gates deletion only). Built
+  for socratic-partner's completed-session cleanup. 7 offline tests.
 - [ ] Optional deletion of hub-owned messages (ownership rules still to design).
 - [x] **Voice send + ownership** (ADR 0005) — join/leave/play/stop/status,
   one owned connection per guild (409 on contention, 403 for non-owners),

@@ -702,6 +702,22 @@ class HubBot(discord.Client):
         await channel.delete(reason="Hub cleanup request in operator-approved parent channel")
         logger.info("deleted thread %s under parent %s", thread_id, channel.parent_id)
 
+    async def archive_thread(
+        self, thread_id: int, *, archived: bool = True, locked: bool = False
+    ) -> dict:
+        """Archive (or unarchive) a thread. Reversible, so unlike deletion it
+        needs no per-registration opt-in (ADR 0004 gates deletion only)."""
+        channel = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
+        if not isinstance(channel, discord.Thread):
+            raise LookupError(f"Channel {thread_id} is not a thread")
+        if channel.guild.id != self.settings.discord_guild_id:
+            raise PermissionError("Thread is outside the configured server")
+        await channel.edit(
+            archived=archived, locked=locked, reason="Hub archive request by consumer"
+        )
+        logger.info("archived=%s locked=%s thread %s", archived, locked, thread_id)
+        return {"id": str(thread_id), "archived": archived, "locked": locked}
+
     async def channel_history(
         self, channel_id: int, limit: int = 50, before: int | None = None
     ) -> dict:

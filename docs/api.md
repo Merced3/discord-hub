@@ -305,6 +305,27 @@ exist), outside the configured server, or Discord permission denied, `404`
 missing or not a thread, `502` other upstream Discord failure. A repeated
 call can return `404`; no automatic retries or bulk deletion.
 
+### `POST /threads/{thread_id}/archive`
+Archive (or unarchive) a thread in the configured server. Reversible, so
+unlike deletion it needs no opt-in flag and no owner confirmation (ADR
+0004 gates deletion only). Body is optional; defaults archive the thread
+unlocked. `locked: true` also locks it (requires Manage Threads).
+
+**Request (optional)**
+```json
+{ "archived": true, "locked": false }
+```
+Pass `"archived": false` to unarchive.
+
+**Response `200`**
+```json
+{ "id": "111", "archived": true, "locked": false }
+```
+
+Errors: `404` missing or not a thread, `403` outside the configured
+server or Discord permission denied, `502` other upstream Discord
+failure.
+
 ### `GET /channels/{channel_id}/history?limit=50&before=123`
 Read one page from a text channel or individual thread in the configured server.
 Requires View Channel and Read Message History. `limit` is 1–100 (default 50).

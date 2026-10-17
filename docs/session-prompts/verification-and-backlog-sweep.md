@@ -4,6 +4,8 @@
 
 Roadmap: `Automations/ops/session-prompts/README.md` (#3).
 
+*When done, mark it up here.*
+
 Copy everything below the line into the new session.
 
 ---
@@ -56,3 +58,7 @@ approve, then implement. Update `docs/roadmap.md` the same day.
 Each owed verification is verified or explicitly dropped; thread
 archive/delete are available to consumers (unblocks #4); the backlog
 items are done or have a recorded decision; roadmap updated; tick #3.
+
+---
+
+*When your done, say whatever you did here, don't edit the prompt above, just edit this part and below.*
