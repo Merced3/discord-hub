@@ -120,8 +120,12 @@ next hub task.
 ## Backlog (full picture, with expectations)
 
 1. **Voice receive/streaming + speaking events** — ✅ done (Stage 2,
-   ADR 0005). Follow-up: drop the PR-branch pin once a voice-recv release
-   ships DAVE decryption.
+   ADR 0005). Follow-up checked 2026-10-17: latest PyPI release
+   (0.5.2a179, 2025-06) predates DAVE and upstream PR #58 is still open,
+   so the PR-branch pin **stays**; re-check at the next upstream release.
+4. **VPS deployment (24/7 operation)** — ✅ done (hub runs on the
+   droplet; see the ops RUNBOOK). **Hub API key: decided against** —
+   Docker network + Tailscale is the auth boundary (ADR 0010).
 2. **Live two-consumer acceptance run** — real simultaneous registrations,
    identities, command collisions, one callback down. Offline tests cover the
    logic; this proves it against live Discord. Expect one session, mostly
@@ -130,10 +134,6 @@ next hub task.
    nothing applied without a yes. Needs Manage Channels + Manage Roles
    (portal session). The original 24/7-manager thesis. Medium effort;
    the "good taste" part iterates forever.
-4. **VPS deployment (24/7 operation)** — systemd on Linux; graceful shutdown
-   finally works properly there. Remote access also makes the optional
-   **hub API key** worth adding (localhost trust model breaks remotely).
-   Small-medium ops session.
 5. **Hub-owned message deletion** — tiny; only if a consumer asks again.
 6. ~~**"Project is offline" auto-reply**~~ ✅ done 2026-10-17 — an
    unreachable command callback now gets an immediate ephemeral
