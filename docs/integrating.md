@@ -100,6 +100,11 @@ idempotent and keeps the hub in sync after restarts.
   the hub only performs the Discord deletion.
 - `GET /channels/{id}/history` — paginated, newest-first reads. You own
   pagination, storage, and retention. Not a lossless backup.
+- Command **autocomplete**: mark a string/integer/number option
+  `"autocomplete": true` in `PUT /commands`; while the user types, your
+  callback gets `{"type": "autocomplete", "option": {"name", "value"}}`
+  and must answer `{"choices": [{"name", "value"}]}` (max 25) within ~3s.
+  On error the hub returns an empty list for you.
 
 ## Voice
 

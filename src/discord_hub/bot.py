@@ -1059,7 +1059,9 @@ class HubBot(discord.Client):
         self.tree.clear_commands(guild=guild)
         for _callback_url, specs in self.command_store.all().items():
             for spec in specs:
-                self.tree.add_command(build_command(spec, self._invoke_command), guild=guild)
+                self.tree.add_command(
+                    build_command(spec, self._invoke_command, self._autocomplete), guild=guild
+                )
 
     async def set_commands(self, callback_url: str, specs: list[CommandSpec]) -> int:
         # Guild command sync replaces the entire guild set. Serialize updates
@@ -1068,7 +1070,7 @@ class HubBot(discord.Client):
             self.command_store.validate_project_commands(callback_url, specs)
             candidate = {**self.command_store.all(), callback_url: specs}
             built = [
-                build_command(spec, self._invoke_command)
+                build_command(spec, self._invoke_command, self._autocomplete)
                 for project_specs in candidate.values()
                 for spec in project_specs
             ]
@@ -1159,6 +1161,40 @@ class HubBot(discord.Client):
                 )
         except discord.HTTPException:
             logger.exception("could not answer interaction %s", interaction_id)
+
+    async def _autocomplete(
+        self, spec: CommandSpec, interaction: discord.Interaction, option_name: str, current: Any
+    ) -> list[dict[str, Any]]:
+        """Route an autocomplete request to the owning project's callback.
+        Discord needs an answer within 3s; on any failure return no choices."""
+        callback_url = self.command_store.owner_of(spec.name)
+        if callback_url is None:
+            return []
+        event = {
+            "type": "autocomplete",
+            "command": spec.name,
+            "option": {"name": option_name, "value": current},
+            "options": dict(getattr(getattr(interaction, "namespace", None), "__dict__", {}) or {}),
+            "channel_id": str(interaction.channel_id),
+            "user": {"id": str(interaction.user.id), "name": interaction.user.display_name},
+        }
+        try:
+            async with self._http.post(
+                callback_url,
+                json=event,
+                timeout=aiohttp.ClientTimeout(total=_CALLBACK_BUDGET_S),
+            ) as resp:
+                body = await resp.json(content_type=None)
+        except (TimeoutError, aiohttp.ClientError):
+            logger.warning(
+                "autocomplete /%s option %s callback to %s failed; no choices",
+                spec.name,
+                option_name,
+                callback_url,
+            )
+            return []
+        choices = body.get("choices", [])
+        return choices if isinstance(choices, list) else []
 
     async def interaction_followup(
         self, interaction_id: str, text: str, ephemeral: bool = False

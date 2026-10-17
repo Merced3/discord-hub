@@ -79,6 +79,11 @@ next hub task.
 - [x] Read-only newest-first history pages for text channels and threads.
   **11 additional offline safety/contract tests passed (25 total).** Neither
   deletion nor history has been live-tested in this workstream.
+- [x] **Command autocomplete routing** — options declared with
+  `"autocomplete": true` in `PUT /commands` route typing suggestions to
+  the owning project's callback (`autocomplete` event; response `choices`,
+  max 25, ~3s budget). Failure returns an empty list — autocomplete never
+  hangs. Built for socratic-partner's `/model`. 6 offline tests.
 - [x] **Thread archive/unarchive** — `POST /threads/{id}/archive`
   (optional body `{archived, locked}`; `archived: false` unarchives).
   Reversible, so no opt-in flag (ADR 0004 gates deletion only). Built

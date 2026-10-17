@@ -400,6 +400,25 @@ whole set; the hub registers them with Discord and routes invocations to
 }
 ```
 Option `type`: `integer` | `string` | `boolean` | `number`.
+Add `"autocomplete": true` to a `string`/`integer`/`number` option to have
+typing suggestions routed to your callback (see below).
+
+**Autocomplete routing** — when a user types into an option declared with
+`"autocomplete": true`, the hub POSTs to the callback and the response's
+`choices` become Discord's suggestions (max 25, names ≤ 100 chars):
+```json
+{
+  "type": "autocomplete",
+  "command": "model",
+  "option": { "name": "model", "value": "gp" },
+  "options": { "model": "gp" },
+  "channel_id": "123",
+  "user": { "id": "789", "name": "cedgo" }
+}
+```
+Respond with `{ "choices": [ { "name": "gpt-5", "value": "gpt-5" } ] }`.
+Discord needs an answer within ~3 seconds; on callback error/timeout the
+hub answers with an empty list, so autocomplete never hangs.
 
 **Response `200`** — `{ "synced": 1 }`. Errors: `409` name owned by
 another project, `403` bot invite lacks the `applications.commands` scope,

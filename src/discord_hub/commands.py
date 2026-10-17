@@ -101,6 +101,10 @@ class CommandStore:
 def build_command(
     spec: CommandSpec,
     invoke: Callable[[CommandSpec, discord.Interaction, dict[str, Any]], Awaitable[None]],
+    autocomplete: Callable[
+        [CommandSpec, discord.Interaction, str, Any], Awaitable[list[dict[str, Any]]]
+    ]
+    | None = None,
 ) -> app_commands.Command:
     """Build a real Discord app command from a declared spec.
 
@@ -140,4 +144,37 @@ def build_command(
     described = app_commands.describe(
         **{o["name"]: o.get("description", "") for o in spec.options}
     )(callback)
+    if autocomplete is not None:
+        handlers = {}
+        for opt in spec.options:
+            if opt.get("autocomplete"):
+                handlers[opt["name"]] = _make_autocomplete(spec, opt["name"], autocomplete)
+        if handlers:
+            described = app_commands.autocomplete(**handlers)(described)
     return app_commands.Command(name=spec.name, description=spec.description, callback=described)
+
+
+def _make_autocomplete(
+    spec: CommandSpec,
+    option_name: str,
+    autocomplete: Callable[
+        [CommandSpec, discord.Interaction, str, Any], Awaitable[list[dict[str, Any]]]
+    ],
+) -> Callable[[discord.Interaction, Any], Awaitable[list[app_commands.Choice]]]:
+    """One autocomplete handler per option, routed to the owning project."""
+
+    async def complete(interaction: discord.Interaction, current: Any) -> list[app_commands.Choice]:
+        try:
+            raw = await autocomplete(spec, interaction, option_name, current)
+        except Exception:
+            logger.exception("autocomplete for /%s option %s failed", spec.name, option_name)
+            return []
+        choices = []
+        for c in raw[:25]:
+            try:
+                choices.append(app_commands.Choice(name=str(c["name"])[:100], value=c["value"]))
+            except (KeyError, TypeError):
+                logger.warning("bad autocomplete choice from /%s: %r", spec.name, c)
+        return choices
+
+    return complete
