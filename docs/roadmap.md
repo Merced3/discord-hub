@@ -73,12 +73,18 @@ next hub task.
   409 hijack refusal, inbound payloads). A run with the *real* Socrates +
   teaching-agent pair is still worthwhile once both are voice-ready.
   Found and fixed: API-created threads defaulted to private (now public).
+  **Real-pair run 2026-10-17**: teaching-agent full voice session (auto-join,
+  STT heard the user, spoken reply) while Socrates answered `/ask-now` —
+  thread created, question posted with Socrates' webhook identity, follow-ups
+  delivered. Both consumers simultaneously live through the hub.
 - [x] Thread deletion scoped by per-registration opt-in flag
   (`allow_thread_deletion`, default false) with per-deletion confirmation
   collected by the consumer (ADR 0004).
 - [x] Read-only newest-first history pages for text channels and threads.
-  **11 additional offline safety/contract tests passed (25 total).** Neither
-  deletion nor history has been live-tested in this workstream.
+  **11 additional offline safety/contract tests passed (25 total).**
+  **Live-tested 2026-10-17** in the 🧪 LAB: newest-first pagination with
+  `before`, thread history reads; deletion 204, repeat-delete 404, parent
+  channel refused 404 (owner-confirmed per ADR 0004).
 - [x] **Command autocomplete routing** — options declared with
   `"autocomplete": true` in `PUT /commands` route typing suggestions to
   the owning project's callback (`autocomplete` event; response `choices`,
@@ -103,7 +109,14 @@ next hub task.
   echo in the LAB voice channel. 11 new offline tests. STT/LLM/TTS remain
   consumer responsibilities. Receive-path hardening (RTP padding strip,
   drop-frame guard, non-audio guard) landed hub-side 2026-10-02 (ADR 0006)
-  after Discord began padding voice payloads; pending live re-verification.
+  after Discord began padding voice payloads. **Live re-verified
+  2026-10-17** (full session: user speech → STT → spoken reply). The
+  re-verification caught that voice had actually been **broken since the
+  VPS move**, masked by health checks that only probe `/health`: (1) the
+  rebuilt image had no `websockets` package, so uvicorn returned HTTP 404
+  for every `/voice/stream` handshake (fixed: declared the dep); (2) the
+  slim image had no `libopus0`, so discord.py raised `OpusNotLoaded` on
+  every packet (fixed in the shared `python-app.Dockerfile`).
 - [x] **Voice-state events** — registrations opt in with `voice_events: true`
   and receive guild-wide join/leave/move events at their callback URL.
   Lets projects trigger sessions when a user joins a voice channel without
@@ -114,7 +127,8 @@ next hub task.
   callbacks (`added`/`removed`) for those emojis on any message in the
   server, old messages included (raw gateway events). Removing the
   reaction undoes the mark. What a marker means is the project's policy.
-  8 offline tests. Not yet live-verified.
+  8 offline tests. **Live-verified 2026-10-17** in the 🧪 LAB: 🔄 added
+  and removed both delivered with the right marker/message/user.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
 
 ## Backlog (full picture, with expectations)
@@ -126,10 +140,8 @@ next hub task.
 4. **VPS deployment (24/7 operation)** — ✅ done (hub runs on the
    droplet; see the ops RUNBOOK). **Hub API key: decided against** —
    Docker network + Tailscale is the auth boundary (ADR 0010).
-2. **Live two-consumer acceptance run** — real simultaneous registrations,
-   identities, command collisions, one callback down. Offline tests cover the
-   logic; this proves it against live Discord. Expect one session, mostly
-   verification.
+2. ~~**Live two-consumer acceptance run**~~ ✅ done 2026-10-17 (see the
+   workstream note above).
 3. **Caretaker proposals** — hub/agent proposes server-structure improvements;
    nothing applied without a yes. Needs Manage Channels + Manage Roles
    (portal session). The original 24/7-manager thesis. Medium effort;
