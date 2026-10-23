@@ -1,0 +1,50 @@
+# Auto-merge Dependabot PRs once required checks pass.
+#
+# Safety model:
+# - `gh pr merge --auto` only completes the merge once branch protection's
+#   required check (`checks / checks`) is green — CI is the gate, this is
+#   just the hand that clicks the button.
+# - Patch + minor bumps merge themselves. Major bumps are labeled
+#   `needs-review` and left for a human.
+# - Uses `pull_request_target` on purpose: workflows triggered by
+#   dependabot[bot] get a READ-ONLY token under plain `pull_request`,
+#   which can't enable auto-merge. This job never checks out or runs PR
+#   code (metadata + `gh pr merge` only), so the elevated context is safe.
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge patch/minor bumps
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+      - name: Flag major bumps for a human
+        if: steps.meta.outputs.update-type != 'version-update:semver-patch' && steps.meta.outputs.update-type != 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Label may not exist yet on a fresh repo — create, then apply.
+          gh label create needs-review --description "Dependency bump skipped by auto-merge; needs a human" --color d93f0b 2>/dev/null || true
+          gh pr edit "$PR_URL" --add-label "needs-review" || true
+          gh pr comment "$PR_URL" --body "Major version bump — skipping auto-merge. A human should review this one." || true

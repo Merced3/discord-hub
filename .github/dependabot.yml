@@ -1,0 +1,16 @@
+# Dependabot version updates (Stage 5, added 2026-10-15 — pilot repo).
+# PRs are gated by branch protection (checks / checks required) and
+# auto-merged when green by .github/workflows/dependabot-auto-merge.yml.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
