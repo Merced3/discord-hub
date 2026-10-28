@@ -80,7 +80,31 @@ merged to `master` and deployed clean (watch `#ops-alerts`).
 
 ---
 
-## Outcome — (to be filled in by the session that runs this)
+## Outcome — 2026-10-28 (FIXED; offline verification green)
+
+`_scan_state` now treats a backtick run as an inline-code delimiter and
+ignores all other markdown markers until the same-length closing run. This
+covers ordinary and double-backtick spans while preserving backslash escapes,
+fences, and synthetic close/reopen wrappers for code spans that really do cross
+a chunk boundary. `scripts/split_playground.py` received the same scanner fix
+plus a behavioral self-check for closed snake_case code spans.
+
+Tests were approved first and failed on the old implementation for the intended
+reasons. The exact clean 894-character dev-agent message was recovered from the
+lab pi transcript and pinned at
+`tests/fixtures/dev_agent_phantom_suffix.txt`: it previously produced the
+proven `['`', '_', '`']` stack and `` `_` `` suffix, and now round-trips as one
+chunk with no synthetic wrapper. A forced hard split through snake_case inside
+inline code also produces only matching backtick wrappers. Full verification:
+**125 tests passed**, Ruff clean, and playground **16/16** checks passed.
+
+**Test-registration decision:** do not add a hub-side ephemeral/TTL registration
+mode for this need. Temporary lab ownership and the unregistered default are
+ops/consumer lifecycle policy, not Discord transport; the existing registration
+API already provides the required primitives. Keep `lab_registration.py` with
+dev-agent while it is the sole automated consumer. If multiple projects automate
+lab runs, extract a project-neutral ops lab helper rather than moving that policy
+into discord-hub.
 
 ## While you're in here (optional backlog idea, owner 2026-10-28)
 

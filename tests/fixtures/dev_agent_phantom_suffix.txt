@@ -1,0 +1,14 @@
+Tests approved and committed. Summary:
+
+**Tests written** (`tests/test_greeter.py`, exactly the three approved tests):
+- `test_excited_uppercases_and_adds_exclamation` — expects `greet("lab", excited=True) == "HELLO, LAB!!"`
+- `test_excited_defaults_to_false` — `greet("lab") == "Hello, lab!"`
+- `test_excited_false_matches_plain_greeting` — `greet("lab", excited=False) == "Hello, lab!"`
+
+**Test run results** — 2 failed, 2 passed, all for the right reasons:
+- Both `excited=` tests fail with `TypeError: greet() got an unexpected keyword argument 'excited'` (feature doesn't exist yet)
+- Both default-behavior tests pass (existing behavior unchanged)
+
+**Commit** — `3b3f21b test: add tests for excited option in greet()` on `dev/ffd471608508-add-an-excited-option`, containing only the test file (12 insertions). No src or config changes.
+
+Ready for the implementation phase on your approval.

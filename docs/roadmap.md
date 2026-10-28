@@ -151,6 +151,9 @@ next hub task.
    unreachable command callback now gets an immediate ephemeral
    "unreachable right now" notice instead of a bare auto-defer.
    4 offline tests.
+7. ~~**Inline-code-aware markdown scanning**~~ ✅ done 2026-10-28 — markers
+   inside inline code no longer corrupt chunk wrappers, including the captured
+   snake_case phantom-suffix case and forced split seams. Regression-tested.
 
 ## Explicitly out of scope (for now)
 

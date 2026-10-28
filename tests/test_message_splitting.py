@@ -7,7 +7,7 @@ import string
 import unittest
 from pathlib import Path
 
-from discord_hub.bot import _MESSAGE_LIMIT, _chunks, _chunks_with_meta
+from discord_hub.bot import _MESSAGE_LIMIT, _chunks, _chunks_with_meta, _scan_state
 
 FIXTURE = Path(__file__).parent / "fixtures" / "my_message.txt"
 
@@ -74,6 +74,41 @@ class MessageSplittingTests(unittest.TestCase):
         text = "Intro.\n" + "\n".join(f"- item number {i} with some text" for i in range(1, 9))
         for c in assert_lossless(self, text, 80)[1:]:
             self.assertTrue(c.startswith("- "), f"continuation starts mid-item: {c!r}")
+
+    def test_captured_inline_code_phantom_suffix(self):
+        text = (FIXTURE.parent / "dev_agent_phantom_suffix.txt").read_text(encoding="utf-8")
+        self.assertEqual(len(text), 894)  # the exact dev-agent source captured on 2026-10-28
+        self.assertEqual(_scan_state(text).inline_stack, [])
+        self.assertEqual(_chunks_with_meta(text), [(text, "", "")])
+        self.assertEqual(_chunks(text), [text])
+
+    def test_inline_code_ignores_markdown_markers(self):
+        cases = (
+            "`test_excited_uppercases_and_adds_exclamation`",
+            "`*_**~~||_snake_case_||~~**_*`",
+            "**bold `snake_case_name` bold**",
+            "``double_underscores_and_`single_backticks`_ignored``",
+        )
+        for text in cases:
+            with self.subTest(text=text):
+                self.assertEqual(_scan_state(text).inline_stack, [])
+                self.assertEqual(_chunks_with_meta(text), [(text, "", "")])
+
+    def test_inline_code_split_has_only_matching_code_wrappers(self):
+        # No spaces: force a hard split through snake_case, not a convenient word boundary.
+        text = "Before `" + "test_excited_uppercases_and_adds_exclamation" * 100 + "` after."
+        meta = _chunks_with_meta(text, _MESSAGE_LIMIT)
+        assert_lossless(self, text, _MESSAGE_LIMIT)
+        self.assertGreater(len(meta), 1)
+        for previous, following in zip(meta, meta[1:], strict=False):
+            self.assertEqual(previous[2], "`")
+            self.assertEqual(following[1], "`")
+        self.assertEqual(meta[0][1], "")
+        self.assertEqual(meta[-1][2], "")
+
+    def test_escaped_markers_remain_escaped(self):
+        text = r"\*literal\* and \`literal\` and \_literal\_"
+        self.assertEqual(_scan_state(text).inline_stack, [])
 
     def test_randomized_stress(self):
         rng = random.Random(42)

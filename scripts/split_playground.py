@@ -41,7 +41,8 @@ class _MdState:
 def _scan_state(text: str) -> _MdState:
     """Walk text and return the markdown state at the end of it.
 
-    Handles backslash escapes. Fences are line-oriented (``` toggles),
+    Handles backslash escapes. Fences are line-oriented (``` toggles).
+    Inline code uses a matching backtick run and hides every other marker;
     everything else is a simple toggle stack (** before *, so bold wins).
     """
     state = _MdState()
@@ -49,6 +50,20 @@ def _scan_state(text: str) -> _MdState:
     at_line_start = True
     while i < n:
         ch = text[i]
+        if state.inline_stack and state.inline_stack[-1].startswith("`"):
+            delimiter = state.inline_stack[-1]
+            if ch == "`":
+                run_end = i + 1
+                while run_end < n and text[run_end] == "`":
+                    run_end += 1
+                if run_end - i == len(delimiter):
+                    state.inline_stack.pop()
+                i = run_end
+                at_line_start = False
+            else:
+                at_line_start = ch == "\n"
+                i += 1
+            continue
         if ch == "\\":  # escaped char: skip both
             i += 2
             at_line_start = False
@@ -77,8 +92,15 @@ def _scan_state(text: str) -> _MdState:
         if state.in_fence:
             i += 1
             continue
+        if ch == "`":
+            run_end = i + 1
+            while run_end < n and text[run_end] == "`":
+                run_end += 1
+            state.inline_stack.append(text[i:run_end])
+            i = run_end
+            continue
         # inline markers (check longest first)
-        for marker in ("**", "~~", "||", "*", "`", "_"):
+        for marker in ("**", "~~", "||", "*", "_"):
             if text.startswith(marker, i):
                 if state.inline_stack and state.inline_stack[-1] == marker:
                     state.inline_stack.pop()
@@ -257,8 +279,20 @@ def _selftest() -> int:
     print(f"[{'PASS' if ok else 'FAIL'}] list split between items")
     behavioral_failures += 0 if ok else 1
 
+    # 3) closed inline code must not synthesize wrappers from its contents
+    text = "Use `test_excited_uppercases_and_adds_exclamation` here."
+    chunks = chunks_with_meta(text)
+    ok = (
+        len(chunks) == 1
+        and not chunks[0].added_prefix
+        and not chunks[0].added_suffix
+        and not _scan_state(text).inline_stack
+    )
+    print(f"[{'PASS' if ok else 'FAIL'}] inline code ignores snake_case markers")
+    behavioral_failures += 0 if ok else 1
+
     total = failures + behavioral_failures
-    print(f"{len(cases) + 2 - total}/{len(cases) + 2} total passed")
+    print(f"{len(cases) + 3 - total}/{len(cases) + 3} total passed")
     return 1 if total else 0
 
 

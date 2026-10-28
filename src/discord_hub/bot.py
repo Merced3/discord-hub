@@ -38,7 +38,8 @@ class _MdState:
 def _scan_state(text: str) -> _MdState:
     """Walk text and return the markdown state at the end of it.
 
-    Handles backslash escapes. Fences are line-oriented (``` toggles),
+    Handles backslash escapes. Fences are line-oriented (``` toggles).
+    Inline code uses a matching backtick run and hides every other marker;
     everything else is a simple toggle stack (** before *, so bold wins).
     """
     state = _MdState()
@@ -46,6 +47,20 @@ def _scan_state(text: str) -> _MdState:
     at_line_start = True
     while i < n:
         ch = text[i]
+        if state.inline_stack and state.inline_stack[-1].startswith("`"):
+            delimiter = state.inline_stack[-1]
+            if ch == "`":
+                run_end = i + 1
+                while run_end < n and text[run_end] == "`":
+                    run_end += 1
+                if run_end - i == len(delimiter):
+                    state.inline_stack.pop()
+                i = run_end
+                at_line_start = False
+            else:
+                at_line_start = ch == "\n"
+                i += 1
+            continue
         if ch == "\\":  # escaped char: skip both
             i += 2
             at_line_start = False
@@ -72,7 +87,14 @@ def _scan_state(text: str) -> _MdState:
         if state.in_fence:
             i += 1
             continue
-        for marker in ("**", "~~", "||", "*", "`", "_"):
+        if ch == "`":
+            run_end = i + 1
+            while run_end < n and text[run_end] == "`":
+                run_end += 1
+            state.inline_stack.append(text[i:run_end])
+            i = run_end
+            continue
+        for marker in ("**", "~~", "||", "*", "_"):
             if text.startswith(marker, i):
                 if state.inline_stack and state.inline_stack[-1] == marker:
                     state.inline_stack.pop()
