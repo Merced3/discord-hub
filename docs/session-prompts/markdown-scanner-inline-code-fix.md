@@ -81,3 +81,15 @@ merged to `master` and deployed clean (watch `#ops-alerts`).
 ---
 
 ## Outcome — (to be filled in by the session that runs this)
+
+## While you're in here (optional backlog idea, owner 2026-10-28)
+
+The 🧪 LAB channels' default state is now UNREGISTERED (owner policy):
+tests claim a channel, then release it. Today that means every test
+harness does snapshot/delete/re-register dances around the hub's
+single-owner registrations. Consider (decide, don't necessarily build):
+an opt-in **test registration mode** — e.g. a registration flag that
+yields to any newer registration and auto-reclaims when the newer one
+is deleted, or first-class ephemeral registrations with a TTL. If you
+decide it's not worth it, record the decision; the claim/release script
+in ops/dev-agent/scripts/ is the interim answer.
