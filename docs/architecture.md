@@ -47,7 +47,10 @@ which project registered interest in that channel, then delivers the
 message to that project's callback URL. Registration is explicit: a
 project says "messages in channel X belong to me" via
 `POST /registrations`. The hub does not guess, and it does not decide
-what the message *means*.
+what the message *means*. Registrations and command declarations use
+transactional Postgres in production; the database enforces one owner per
+channel and command name. Alembic owns the hub schema and its future archive
+revisions. The archive itself is a separate feature, not part of routing state.
 
 ## The routing rule
 

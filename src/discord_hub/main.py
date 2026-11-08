@@ -25,8 +25,14 @@ async def hub_service(ctx: ServiceContext) -> None:
     """The hub as a harness-supervised service: runs until the harness
     requests shutdown via ctx.stop_event."""
     settings = Settings()  # type: ignore[call-arg]  # values come from env
-    registry = Registry(settings.data_dir / "registrations.json")
-    command_store = CommandStore(settings.data_dir / "commands.json")
+    registry = Registry(
+        settings.data_dir / "registrations.json",
+        database_url=settings.discord_hub_database_url,
+    )
+    command_store = CommandStore(
+        settings.data_dir / "commands.json",
+        database_url=settings.discord_hub_database_url,
+    )
     bot = HubBot(settings, registry, command_store)
     bot.ready_event = asyncio.Event()
 
@@ -49,7 +55,7 @@ async def hub_service(ctx: ServiceContext) -> None:
 
 
 def main() -> None:
-    harness = Harness(HarnessConfig(data_dir="data"), name="discord-hub")
+    harness = Harness(HarnessConfig.from_env(), name="discord-hub")
     harness.add_service("hub", hub_service)
     harness.run()  # async runtime: harness owns the event loop
 

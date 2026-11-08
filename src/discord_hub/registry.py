@@ -1,10 +1,4 @@
-"""Channel registrations: which project owns which channel, and how to reach it.
-
-A registration says "messages in channel X belong to project Y" — deliver
-them to Y's callback URL, and send Y's outbound messages through a webhook
-that carries Y's name and avatar (ADR 0002). Registrations persist to a
-JSON file so they survive restarts.
-"""
+"""Channel registrations in crash-safe local JSON or transactional Postgres."""
 
 from __future__ import annotations
 
@@ -12,6 +6,9 @@ import json
 import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+import psycopg
+from psycopg.types.json import Jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -23,31 +20,10 @@ class Registration:
     display_name: str | None = None
     avatar_url: str | None = None
     webhook_url: str | None = None
-    # Declared intent: threads under this channel may be deleted on request.
-    # Default False; consumers opt in and still confirm each deletion with
-    # the owner (ADR 0004).
     allow_thread_deletion: bool = False
-    # Declared intent: this project wants voice-state events (user joined /
-    # left / moved voice channels, guild-wide) POSTed to its callback URL.
-    # Default False; consumers opt in. Used for triggers like "start a
-    # session when the owner joins a voice channel" — the policy stays in
-    # the project, the hub only routes.
     voice_events: bool = False
-    # Declared intent: this project wants reaction-marker events (a configured
-    # emoji added to / removed from any message in the server) POSTed to its
-    # callback URL. Default False; consumers opt in. The emoji -> marker
-    # mapping is hub config; what a marker *means* is the project's policy.
     reaction_events: bool = False
-    # Declared intent (ADR 0009): on a forum registration, permits
-    # moderation-class actions — retag / rename / archive / lock / pin posts
-    # and administering the forum's available tag set. Default False; the
-    # consumer still confirms destructive actions with the owner. Discord's
-    # Manage Threads / Manage Channels still apply; the hub never grants
-    # itself permissions.
     allow_forum_moderation: bool = False
-    # Declared intent (ADR 0009): on a forum registration, this project wants
-    # forum lifecycle events (post created/updated/deleted, forum channel
-    # renamed or tag set changed) POSTed to its callback URL. Default False.
     forum_events: bool = False
 
 
@@ -56,21 +32,40 @@ class ChannelTakenError(RuntimeError):
 
 
 class Registry:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path | None = None, *, database_url: str | None = None) -> None:
+        if database_url is None and path is None:
+            raise ValueError("a JSON path or database URL is required")
         self._path = path
+        self._database_url = database_url
         self._by_channel: dict[int, Registration] = {}
+        if database_url:
+            from . import migrations
+
+            migrations.upgrade(database_url)
         self._load()
 
+    def _connect(self):
+        """Bound database waits so a DB/network incident cannot hang a caller."""
+        return psycopg.connect(self._database_url, connect_timeout=5)
+
     def _load(self) -> None:
-        if not self._path.exists():
-            return
-        data = json.loads(self._path.read_text(encoding="utf-8"))
-        for item in data:
-            reg = Registration(**item)
-            self._by_channel[reg.channel_id] = reg
-        logger.info("loaded %d registration(s) from %s", len(self._by_channel), self._path)
+        if self._database_url:
+            with self._connect() as conn:
+                conn.execute("SET statement_timeout = 5000")
+                rows = conn.execute("SELECT registration FROM channel_registrations").fetchall()
+            for (item,) in rows:
+                reg = Registration(**item)
+                self._by_channel[reg.channel_id] = reg
+        elif self._path and self._path.exists():
+            for item in json.loads(self._path.read_text(encoding="utf-8")):
+                reg = Registration(**item)
+                self._by_channel[reg.channel_id] = reg
+        logger.info("loaded %d registration(s)", len(self._by_channel))
 
     def _save(self) -> None:
+        if self._database_url:
+            raise RuntimeError("Postgres writes use per-operation transactions")
+        assert self._path is not None
         self._path.parent.mkdir(parents=True, exist_ok=True)
         data = [asdict(r) for r in self._by_channel.values()]
         temporary = self._path.with_suffix(".tmp")
@@ -86,9 +81,20 @@ class Registry:
     def add(self, reg: Registration) -> None:
         existing = self._by_channel.get(reg.channel_id)
         if existing is not None:
-            raise ChannelTakenError(
-                f"channel {reg.channel_id} is already registered to {existing.callback_url}"
-            )
+            raise ChannelTakenError(f"channel {reg.channel_id} is already registered")
+        if self._database_url:
+            try:
+                with self._connect() as conn, conn.transaction():
+                    conn.execute("SET LOCAL statement_timeout = 5000")
+                    conn.execute("SET LOCAL lock_timeout = 2000")
+                    conn.execute(
+                        "INSERT INTO channel_registrations VALUES (%s, %s)",
+                        (reg.channel_id, Jsonb(asdict(reg))),
+                    )
+            except psycopg.errors.UniqueViolation as exc:
+                raise ChannelTakenError(f"channel {reg.channel_id} is already registered") from exc
+            self._by_channel[reg.channel_id] = reg
+            return
         self._by_channel[reg.channel_id] = reg
         try:
             self._save()
@@ -97,11 +103,23 @@ class Registry:
             raise
 
     def remove(self, channel_id: int) -> Registration | None:
-        reg = self._by_channel.pop(channel_id, None)
-        if reg is not None:
+        reg = self._by_channel.get(channel_id)
+        if reg is None:
+            return None
+        if self._database_url:
+            with self._connect() as conn, conn.transaction():
+                conn.execute("SET LOCAL statement_timeout = 5000")
+                conn.execute("SET LOCAL lock_timeout = 2000")
+                conn.execute(
+                    "DELETE FROM channel_registrations WHERE channel_id = %s", (channel_id,)
+                )
+        else:
+            self._by_channel.pop(channel_id)
             try:
                 self._save()
             except Exception:
                 self._by_channel[channel_id] = reg
                 raise
+            return reg
+        del self._by_channel[channel_id]
         return reg

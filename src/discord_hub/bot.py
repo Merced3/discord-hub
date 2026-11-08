@@ -1102,7 +1102,9 @@ class HubBot(discord.Client):
                 for command in built:
                     self.tree.add_command(command, guild=guild)
                 synced = await self.tree.sync(guild=guild)
-                self.command_store.set_project_commands(callback_url, specs)
+                await asyncio.to_thread(
+                    self.command_store.set_project_commands, callback_url, specs
+                )
             except Exception:
                 self._rebuild_commands()
                 # A network timeout can leave Discord's remote result unknown;
@@ -1317,7 +1319,7 @@ class HubBot(discord.Client):
             forum_events=forum_events,
         )
         try:
-            self.registry.add(reg)
+            await asyncio.to_thread(self.registry.add, reg)
         except Exception:
             try:
                 await webhook.delete(reason="registration could not be saved")
@@ -1332,7 +1334,7 @@ class HubBot(discord.Client):
             return await self._deregister_channel(channel_id)
 
     async def _deregister_channel(self, channel_id: int) -> Registration | None:
-        reg = self.registry.remove(channel_id)
+        reg = await asyncio.to_thread(self.registry.remove, channel_id)
         if reg is not None and reg.webhook_url:
             webhook = discord.Webhook.from_url(reg.webhook_url, client=self)
             try:
