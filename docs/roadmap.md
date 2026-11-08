@@ -130,6 +130,12 @@ next hub task.
   8 offline tests. **Live-verified 2026-10-17** in the 🧪 LAB: 🔄 added
   and removed both delivered with the right marker/message/user.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
+- [x] Managed Postgres state (P2d) — registrations and command declarations
+  use transactional Postgres with Alembic; harness operational state uses the
+  v0.5.0 backend. JSON remains the local default and migration sources are
+  retained read-only under the platform deletion gate. `status.json` and logs
+  remain disposable. Schema revision `0001_hub_state` establishes the hub's
+  migration chain; P4a adds archive tables separately.
 
 ## Backlog (full picture, with expectations)
 

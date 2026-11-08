@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     hub_host: str = "127.0.0.1"
     hub_port: int = 8100
     data_dir: Path = Path("data")
+    # JSON remains the local default; production selects transactional Postgres.
+    discord_hub_database_url: str | None = None
     # Not used yet; kept here so .env can hold it for future features.
     discord_application_id: int | None = None
     # Reaction markers: emoji -> marker name, as a JSON object in the env var

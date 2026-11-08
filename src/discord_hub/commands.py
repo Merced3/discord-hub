@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import Any
 
 import discord
+import psycopg
 from discord import app_commands
+from psycopg.types.json import Jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -43,20 +45,37 @@ class CommandNameTakenError(RuntimeError):
 class CommandStore:
     """Persisted mapping of callback_url -> declared commands."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path | None = None, *, database_url: str | None = None) -> None:
+        if database_url is None and path is None:
+            raise ValueError("a JSON path or database URL is required")
         self._path = path
+        self._database_url = database_url
         self._by_project: dict[str, list[CommandSpec]] = {}
+        if database_url:
+            from . import migrations
+
+            migrations.upgrade(database_url)
         self._load()
 
     def _load(self) -> None:
-        if not self._path.exists():
-            return
-        data = json.loads(self._path.read_text(encoding="utf-8"))
-        for url, specs in data.items():
-            self._by_project[url] = [CommandSpec(**s) for s in specs]
+        if self._database_url:
+            with psycopg.connect(self._database_url) as conn:
+                rows = conn.execute(
+                    "SELECT callback_url, spec FROM command_specs "
+                    "ORDER BY callback_url, command_name"
+                ).fetchall()
+            for url, spec in rows:
+                self._by_project.setdefault(url, []).append(CommandSpec(**spec))
+        elif self._path and self._path.exists():
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            for url, specs in data.items():
+                self._by_project[url] = [CommandSpec(**s) for s in specs]
         logger.info("loaded commands for %d project(s)", len(self._by_project))
 
     def _save(self) -> None:
+        if self._database_url:
+            raise RuntimeError("Postgres writes use per-operation transactions")
+        assert self._path is not None
         self._path.parent.mkdir(parents=True, exist_ok=True)
         data = {url: [asdict(s) for s in specs] for url, specs in self._by_project.items()}
         temporary = self._path.with_suffix(".tmp")
@@ -87,12 +106,24 @@ class CommandStore:
         """Replace a project's set after validation and successful Discord sync."""
         self.validate_project_commands(callback_url, specs)
         previous = self._by_project
-        self._by_project = {**previous, callback_url: specs}
-        try:
+        if self._database_url:
+            try:
+                with psycopg.connect(self._database_url) as conn, conn.transaction():
+                    conn.execute(
+                        "DELETE FROM command_specs WHERE callback_url = %s", (callback_url,)
+                    )
+                    for spec in specs:
+                        conn.execute(
+                            "INSERT INTO command_specs VALUES (%s, %s, %s)",
+                            (spec.name, callback_url, Jsonb(asdict(spec))),
+                        )
+            except psycopg.errors.UniqueViolation as exc:
+                raise CommandNameTakenError(
+                    "a command name is already owned by another project"
+                ) from exc
+        else:
             self._save()
-        except Exception:
-            self._by_project = previous
-            raise
+        self._by_project = {**previous, callback_url: specs}
 
     def all(self) -> dict[str, list[CommandSpec]]:
         return dict(self._by_project)
