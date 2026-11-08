@@ -83,3 +83,8 @@ python -m unittest discover -s tests -v
 
 Tests use temporary state and fake Discord operations; callbacks run on local
 HTTP servers. They do not modify real registrations or consuming projects.
+
+For bounded real-Discord acceptance, follow **`Automations/ops/LAB.md`** to
+claim and check a shared lab channel, protect any prior registration, and
+release the channel afterward. Application-specific configuration and test
+policy remain with the consuming project, not the hub.

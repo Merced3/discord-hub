@@ -58,6 +58,14 @@ Discord code — they talk to this hub over a local HTTP API.
 - `tests/test_multi_client.py` — offline two-project regression suite;
   run with `python -m unittest discover -s tests -v`
 
+## Testing and live acceptance
+
+Keep the default suite offline with fake Discord operations. When a change
+needs bounded real-Discord acceptance, follow **`Automations/ops/LAB.md`** for
+channel discovery, claim/check/release, protected owner snapshots, and explicit
+restore. The hub still owns only Discord transport and the registration API;
+consumer configuration and lab lifecycle stay outside the hub.
+
 ## Repository boundaries
 
 Only edit discord-hub in this session. The sibling socratic-partner and
