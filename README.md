@@ -70,8 +70,10 @@ files. Production uses managed Postgres when `DISCORD_HUB_DATABASE_URL` and
 Copy existing JSON read-only with `python -m discord_hub.state_migrate data
 "$DISCORD_HUB_DATABASE_URL"`, and harness SQLite with the harness migration CLI.
 The copy is idempotent and never overwrites destination records; load the live
-droplet first, then older laptop state. Source deletion remains gated by the
-platform backup/restore evidence and explicit owner approval.
+droplet first, then older laptop state. Stop the old hub before the **final**
+copy (its stores cache state), then start the replacement only after the copy
+and harness delta complete. Source deletion remains gated by the platform
+backup/restore evidence and explicit owner approval.
 
 ## Status
 

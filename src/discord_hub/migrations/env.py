@@ -5,7 +5,10 @@ from sqlalchemy import engine_from_config, pool
 
 config = context.config
 section = config.get_section(config.config_ini_section, {})
-section["sqlalchemy.url"] = config.attributes["database_url"]
+url = config.attributes["database_url"]
+if url.startswith("postgresql://"):
+    url = "postgresql+psycopg://" + url.removeprefix("postgresql://")
+section["sqlalchemy.url"] = url
 connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
 with connectable.connect() as connection:
     context.configure(connection=connection)

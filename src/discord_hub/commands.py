@@ -57,9 +57,14 @@ class CommandStore:
             migrations.upgrade(database_url)
         self._load()
 
+    def _connect(self):
+        """Bound database waits so a DB/network incident cannot hang a caller."""
+        return psycopg.connect(self._database_url, connect_timeout=5)
+
     def _load(self) -> None:
         if self._database_url:
-            with psycopg.connect(self._database_url) as conn:
+            with self._connect() as conn:
+                conn.execute("SET statement_timeout = 5000")
                 rows = conn.execute(
                     "SELECT callback_url, spec FROM command_specs "
                     "ORDER BY callback_url, command_name"
@@ -108,7 +113,12 @@ class CommandStore:
         previous = self._by_project
         if self._database_url:
             try:
-                with psycopg.connect(self._database_url) as conn, conn.transaction():
+                with self._connect() as conn, conn.transaction():
+                    conn.execute("SET LOCAL statement_timeout = 5000")
+                    conn.execute("SET LOCAL lock_timeout = 2000")
+                    conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (callback_url,)
+                    )
                     conn.execute(
                         "DELETE FROM command_specs WHERE callback_url = %s", (callback_url,)
                     )

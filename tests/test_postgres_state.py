@@ -45,10 +45,11 @@ class PostgresStateTests(unittest.TestCase):
 
     def test_failed_registration_does_not_change_memory_or_database(self):
         store = Registry(database_url=self.url)
+        stale = Registry(database_url=self.url)
         store.add(self.registration())
         with self.assertRaises(ChannelTakenError):
-            store.add(self.registration(project="b"))
-        self.assertEqual(len(store.all()), 1)
+            stale.add(self.registration(project="b"))
+        self.assertEqual(len(stale.all()), 0)
         with psycopg.connect(self.url) as conn:
             count = conn.execute("SELECT count(*) FROM channel_registrations").fetchone()[0]
             self.assertEqual(count, 1)
@@ -94,6 +95,44 @@ class PostgresStateTests(unittest.TestCase):
             second["registrations"]["destination_checksum"],
         )
         self.assertEqual(Registry(database_url=self.url).get(10), self.registration())
+        self.assertEqual(
+            CommandStore(database_url=self.url).all(),
+            {"http://consumer.invalid/a": [CommandSpec("alpha", "A")]},
+        )
+
+    def test_database_command_conflict_rolls_back_replacement(self):
+        first = CommandStore(database_url=self.url)
+        stale = CommandStore(database_url=self.url)
+        a, b = "http://consumer.invalid/a", "http://consumer.invalid/b"
+        first.set_project_commands(a, [CommandSpec("alpha", "A")])
+        first.set_project_commands(b, [CommandSpec("beta", "B")])
+        with self.assertRaises(CommandNameTakenError):
+            stale.set_project_commands(b, [CommandSpec("alpha", "Taken")])
+        self.assertEqual(CommandStore(database_url=self.url).all()[b], [CommandSpec("beta", "B")])
+
+    def test_missing_json_is_empty_and_later_commands_do_not_merge(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            missing = migrate_state(root, self.url)
+            self.assertEqual(missing["registrations"]["source_count"], 0)
+            self.assertTrue(missing["commands"]["source_matches_destination"])
+            url = "http://consumer.invalid/a"
+            (root / "commands.json").write_text(
+                json.dumps({url: [asdict(CommandSpec("new", "New"))]})
+            )
+            migrate_state(root, self.url)
+            (root / "commands.json").write_text(
+                json.dumps({url: [asdict(CommandSpec("old", "Old"))]})
+            )
+            later = migrate_state(root, self.url)
+            self.assertFalse(later["commands"]["source_matches_destination"])
+            self.assertEqual(
+                CommandStore(database_url=self.url).all()[url], [CommandSpec("new", "New")]
+            )
 
 
 if __name__ == "__main__":

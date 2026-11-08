@@ -44,9 +44,14 @@ class Registry:
             migrations.upgrade(database_url)
         self._load()
 
+    def _connect(self):
+        """Bound database waits so a DB/network incident cannot hang a caller."""
+        return psycopg.connect(self._database_url, connect_timeout=5)
+
     def _load(self) -> None:
         if self._database_url:
-            with psycopg.connect(self._database_url) as conn:
+            with self._connect() as conn:
+                conn.execute("SET statement_timeout = 5000")
                 rows = conn.execute("SELECT registration FROM channel_registrations").fetchall()
             for (item,) in rows:
                 reg = Registration(**item)
@@ -79,7 +84,9 @@ class Registry:
             raise ChannelTakenError(f"channel {reg.channel_id} is already registered")
         if self._database_url:
             try:
-                with psycopg.connect(self._database_url) as conn:
+                with self._connect() as conn, conn.transaction():
+                    conn.execute("SET LOCAL statement_timeout = 5000")
+                    conn.execute("SET LOCAL lock_timeout = 2000")
                     conn.execute(
                         "INSERT INTO channel_registrations VALUES (%s, %s)",
                         (reg.channel_id, Jsonb(asdict(reg))),
@@ -100,7 +107,9 @@ class Registry:
         if reg is None:
             return None
         if self._database_url:
-            with psycopg.connect(self._database_url) as conn:
+            with self._connect() as conn, conn.transaction():
+                conn.execute("SET LOCAL statement_timeout = 5000")
+                conn.execute("SET LOCAL lock_timeout = 2000")
                 conn.execute(
                     "DELETE FROM channel_registrations WHERE channel_id = %s", (channel_id,)
                 )
