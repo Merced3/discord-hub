@@ -23,8 +23,10 @@ Two halves, one process:
 
 - **The bot half** (`bot.py`) holds the actual Discord connection. It is
   the only thing in the entire ecosystem that knows the Discord library.
-- **The API half** (`api.py`) is a small HTTP server on localhost. This is
-  the *only* face other projects ever see.
+The API half (`api.py`) is a small HTTP server. Consumers reach it locally,
+through the private Docker network, or over Tailscale. ADR 0011 adds a bearer
+credential for each project so a network connection is not mistaken for proof
+of which project is calling. Authentication does not add a request quota.
 
 `main.py` runs both halves together in one process.
 

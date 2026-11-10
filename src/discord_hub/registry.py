@@ -25,6 +25,8 @@ class Registration:
     reaction_events: bool = False
     allow_forum_moderation: bool = False
     forum_events: bool = False
+    # Non-secret authenticated owner. None means pre-auth legacy state.
+    project_id: str | None = None
 
 
 class ChannelTakenError(RuntimeError):
@@ -77,6 +79,37 @@ class Registry:
 
     def all(self) -> list[Registration]:
         return list(self._by_channel.values())
+
+    def unowned(self) -> list[Registration]:
+        return [reg for reg in self._by_channel.values() if reg.project_id is None]
+
+    def backfill_projects(self, callback_projects: dict[str, str]) -> None:
+        """Explicitly assign legacy owners; never let the first caller adopt."""
+        changed = [
+            reg
+            for reg in self.unowned()
+            if reg.callback_url in callback_projects
+        ]
+        if not changed:
+            return
+        if self._database_url:
+            with self._connect() as conn, conn.transaction():
+                for reg in changed:
+                    updated = Registration(
+                        **{
+                            **asdict(reg),
+                            "project_id": callback_projects[reg.callback_url],
+                        }
+                    )
+                    conn.execute(
+                        "UPDATE channel_registrations SET registration = %s WHERE channel_id = %s",
+                        (Jsonb(asdict(updated)), reg.channel_id),
+                    )
+        for reg in changed:
+            reg.project_id = callback_projects[reg.callback_url]
+        if not self._database_url:
+            self._save()
+        logger.info("assigned owners to %d legacy registration(s)", len(changed))
 
     def add(self, reg: Registration) -> None:
         existing = self._by_channel.get(reg.channel_id)

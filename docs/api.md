@@ -6,6 +6,46 @@ small and Discord-free: no Discord types, no Discord vocabulary beyond
 
 Base URL: `http://localhost:8100` (configurable).
 
+## Authentication and ownership (ADR 0011)
+
+Production uses a distinct bearer token for each project:
+
+```http
+Authorization: Bearer <project-token>
+```
+
+`GET /health` is public. When `HUB_AUTH_MODE=required`, every other HTTP
+route and the voice WebSocket require a valid project or operator token.
+Missing/invalid credentials get `401`; cross-project ownership failures get
+`403`. WebSocket authentication uses the handshake header (never a token in
+the URL). During migration, `optional` accepts tokenless legacy callers but
+rejects invalid tokens; `disabled` retains pre-migration local behavior.
+See [`auth-rollout.md`](auth-rollout.md).
+
+Registrations and command routes have an authenticated project owner. An
+operation on a registered channel, inherited thread, or forum post is
+limited to its owner. This includes using its Discord webhook identity,
+moderating it, and reading its history. Unregistered-channel bot operations
+remain available to authenticated projects. Authentication adds no request
+quota and does not replace Discord permissions or deletion consent.
+
+Every hub callback to a known project includes these headers:
+
+```http
+X-Discord-Hub-Timestamp: <unix-seconds>
+X-Discord-Hub-Signature: v1=<hex-hmac>
+X-Discord-Hub-Project: <non-secret-project-id>
+```
+
+Verify HMAC-SHA256 with your project token over
+`"<timestamp>.<exact-raw-body>"`, using constant-time comparison and a
+five-minute timestamp window. Verify before parsing or acting on JSON.
+Unsigned callbacks can exist only for unowned legacy routes during rollout.
+
+Registration creation still returns the secret Discord `webhook_url`.
+Registration lists and diagnostics omit it; consumers can list only their
+own registrations. Never put API tokens or Discord webhook URLs in logs.
+
 ## Implemented
 
 ### `GET /health`
@@ -58,9 +98,10 @@ existing message (forces the plain bot path — webhooks can't reply).
 Long texts are automatically chunked to fit Discord's limit.
 
 If the channel is registered (below), the message is sent through the
-channel's registration webhook — identity belongs to the *channel's owner*,
-not the caller (the hub trusts local callers; it does not authenticate who
-sent a given request). The response gains a `"via": "webhook"` field.
+channel's registration webhook — identity belongs to the *channel's owner*.
+Only that authenticated project may use the registered route; callers cannot
+claim another project's identity. The response gains a `"via": "webhook"`
+field.
 
 ### `GET /forums/{channel_id}/posts`
 List posts in a forum channel (ADR 0009). Active posts come from cache;
@@ -242,7 +283,8 @@ their sections below.
 Errors: `409` channel already claimed by another project (the hub refuses
 ambiguity rather than picking a winner), `404` unknown channel, `403`
 bot lacks Manage Webhooks. A duplicate claim is rejected before creating a
-webhook. Registrations route traffic; they do not authenticate API callers.
+webhook. Registration ownership is bound to the caller's authenticated
+project id (ADR 0011).
 
 **Inbound delivery** — when a (human) message arrives in a registered
 channel, the hub POSTs to the callback URL:
@@ -296,9 +338,11 @@ Works only when the thread's **parent channel registration** declared
 hub's configured server, and the bot needs Discord's Manage Threads
 permission.
 
-Consumers must ask the owner to confirm each deletion. The flag is declared
-intent, not verified consent — the hub does not independently authenticate
-callers. No consumer database records or local files are touched.
+Consumers must ask the owner to confirm each deletion. The registration
+flag remains declared intent, not a replacement for that confirmation.
+Authentication verifies which project is calling; it does not prove the
+human approved a deletion. No consumer database records or local files are
+touched.
 
 Responses: `204` deleted, `403` parent registration didn't opt in (or doesn't
 exist), outside the configured server, or Discord permission denied, `404`
@@ -366,11 +410,14 @@ Errors: `422` invalid query bounds, `404` missing/unsupported channel, `403`
 outside configured server or lacking permissions, `502` upstream failure.
 
 ### `GET /registrations`
-List all current registrations.
+List the caller's current registrations. Secret `webhook_url` fields are
+omitted. The operator can list all projects for controlled lab lifecycle
+operations, with the same redaction.
 
 ### `DELETE /registrations/{channel_id}`
-Release a channel and delete its webhook. `204` on success, `404` if the
-channel was not registered.
+Release a channel and delete its webhook. Only the owning project or the
+operator may release it. `204` on success, `404` if the channel was not
+registered, `403` if another project owns it.
 
 ### `PUT /commands`
 Declare a project's slash commands (ADR 0003). Replaces the project's
@@ -472,8 +519,9 @@ Use a Unix timestamp; styles: `t T d D f F R`.
 
 ## Voice (ADR 0005)
 
-One voice connection per server, explicitly owned. Owner = the project's
-callback URL (same identity as registrations and commands).
+One voice connection per server, explicitly owned. Authenticated project
+identity determines ownership. The existing `owner` callback-URL field is
+retained for request compatibility and display; it is not proof of identity.
 
 ### `GET /voice/status`
 `{ "connected": bool, "owner": "..."|null, "channel_id": "..."|null }`.
@@ -495,9 +543,10 @@ stream instead).
 
 ### `WS /voice/stream?owner=...`
 The duplex stream (ADR 0005, Stage 2). Owner-only; one stream per voice
-connection — a second attach is closed with code `1008`. Requires an active
-owned voice connection (`/voice/join` first). The stream closes when the
-websocket drops; `/voice/leave` also closes it.
+connection — a second attach is closed with code `1008`. Send the project
+bearer token in the WebSocket handshake's `Authorization` header. Requires
+an active owned voice connection (`/voice/join` first). The stream closes
+when the websocket drops; `/voice/leave` also closes it.
 
 **Hub → owner** (JSON text messages):
 - Audio, one message per 20 ms frame per speaker:

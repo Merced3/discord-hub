@@ -33,6 +33,16 @@ async def hub_service(ctx: ServiceContext) -> None:
         settings.data_dir / "commands.json",
         database_url=settings.discord_hub_database_url,
     )
+    registry.backfill_projects(settings.hub_legacy_callback_projects)
+    command_store.backfill_projects(settings.hub_legacy_callback_projects)
+    if settings.hub_auth_mode == "required":
+        unowned_channels = [reg.channel_id for reg in registry.unowned()]
+        unowned_commands = command_store.unowned_command_names()
+        if unowned_channels or unowned_commands:
+            raise RuntimeError(
+                "required auth cannot start with unowned state: "
+                f"channels={unowned_channels}, commands={unowned_commands}"
+            )
     bot = HubBot(settings, registry, command_store)
     bot.ready_event = asyncio.Event()
 

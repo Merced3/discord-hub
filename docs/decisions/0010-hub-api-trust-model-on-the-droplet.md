@@ -1,7 +1,7 @@
 # 0010 — Hub API trust model on the droplet: no API key (for now)
 
 Date: 2026-10-17
-Status: accepted
+Status: superseded by ADR 0011 (cross-host consumers require project identity)
 
 ## Context
 

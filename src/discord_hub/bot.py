@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 import aiohttp
 import discord
 
+from .auth import HubAuth
 from .capabilities import tier_limit as _tier_limit
 from .commands import CommandSpec, CommandStore, build_command
 from .config import Settings
@@ -217,12 +219,17 @@ class HubBot(discord.Client):
         intents.reactions = True  # reaction markers (raw add/remove events)
         super().__init__(intents=intents)
         self.settings = settings
+        self.auth = HubAuth(
+            mode=settings.hub_auth_mode,
+            project_tokens=settings.hub_project_tokens,
+            operator_token=settings.hub_operator_token,
+        )
         self.registry = registry
         self.command_store = command_store
         self.tree = discord.app_commands.CommandTree(self)
         self.ready_event: asyncio.Event  # assigned in main before startup
         self._http: aiohttp.ClientSession  # created in setup_hook
-        self._interactions: dict[str, tuple[discord.Interaction, float]] = {}
+        self._interactions: dict[str, tuple[discord.Interaction, float, str | None]] = {}
         self.interaction_stats: dict[str, int] = {
             "received": 0,
             "delivered": 0,
@@ -232,6 +239,29 @@ class HubBot(discord.Client):
         self._commands_lock = asyncio.Lock()
         self._registrations_lock = asyncio.Lock()
         self.voice = VoiceManager(settings.discord_guild_id)
+
+    def _post_callback(
+        self,
+        callback_url: str,
+        payload: dict,
+        *,
+        project_id: str | None,
+        timeout: float,
+        allow_redirects: bool = True,
+    ):
+        """Serialize once so the signature covers exactly the bytes sent."""
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        headers = {
+            "Content-Type": "application/json",
+            **self.auth.signature_headers(project_id, body),
+        }
+        return self._http.post(
+            callback_url,
+            data=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+            allow_redirects=allow_redirects,
+        )
 
     async def setup_hook(self) -> None:
         self._http = aiohttp.ClientSession()
@@ -279,10 +309,11 @@ class HubBot(discord.Client):
         if thread_info is not None:
             payload["thread"] = thread_info
         try:
-            async with self._http.post(
+            async with self._post_callback(
                 reg.callback_url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                payload,
+                project_id=reg.project_id,
+                timeout=_MESSAGE_CALLBACK_BUDGET_S,
                 allow_redirects=False,
             ) as resp:
                 if not 200 <= resp.status < 300:
@@ -348,10 +379,11 @@ class HubBot(discord.Client):
         if thread_info is not None:
             payload["thread"] = thread_info
         try:
-            async with self._http.post(
+            async with self._post_callback(
                 reg.callback_url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                payload,
+                project_id=reg.project_id,
+                timeout=_MESSAGE_CALLBACK_BUDGET_S,
                 allow_redirects=False,
             ) as resp:
                 if not 200 <= resp.status < 300:
@@ -385,13 +417,16 @@ class HubBot(discord.Client):
             "after_channel_id": str(after_id) if after_id else None,
         }
         # Deliver once per project even if it registered several channels.
-        callback_urls = {reg.callback_url for reg in self.registry.all() if reg.voice_events}
-        for callback_url in callback_urls:
+        callback_projects = {
+            reg.callback_url: reg.project_id for reg in self.registry.all() if reg.voice_events
+        }
+        for callback_url, project_id in callback_projects.items():
             try:
-                async with self._http.post(
+                async with self._post_callback(
                     callback_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                    payload,
+                    project_id=project_id,
+                    timeout=_MESSAGE_CALLBACK_BUDGET_S,
                     allow_redirects=False,
                 ) as resp:
                     if not 200 <= resp.status < 300:
@@ -445,20 +480,23 @@ class HubBot(discord.Client):
             "user_id": str(event.user_id),
         }
         # Deliver once per project even if it registered several channels.
-        callback_urls = {reg.callback_url for reg in self.registry.all() if reg.reaction_events}
+        callback_projects = {
+            reg.callback_url: reg.project_id for reg in self.registry.all() if reg.reaction_events
+        }
         logger.info(
             "reaction marker %s %r (%s) -> %d project(s)",
             action,
             str(event.emoji),
             marker,
-            len(callback_urls),
+            len(callback_projects),
         )
-        for callback_url in callback_urls:
+        for callback_url, project_id in callback_projects.items():
             try:
-                async with self._http.post(
+                async with self._post_callback(
                     callback_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                    payload,
+                    project_id=project_id,
+                    timeout=_MESSAGE_CALLBACK_BUDGET_S,
                     allow_redirects=False,
                 ) as resp:
                     if not 200 <= resp.status < 300:
@@ -474,10 +512,11 @@ class HubBot(discord.Client):
 
     async def _deliver_forum_event(self, reg: Registration, payload: dict) -> None:
         try:
-            async with self._http.post(
+            async with self._post_callback(
                 reg.callback_url,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=_MESSAGE_CALLBACK_BUDGET_S),
+                payload,
+                project_id=reg.project_id,
+                timeout=_MESSAGE_CALLBACK_BUDGET_S,
                 allow_redirects=False,
             ) as resp:
                 if not 200 <= resp.status < 300:
@@ -1085,7 +1124,20 @@ class HubBot(discord.Client):
                     build_command(spec, self._invoke_command, self._autocomplete), guild=guild
                 )
 
-    async def set_commands(self, callback_url: str, specs: list[CommandSpec]) -> int:
+    async def set_commands(
+        self, callback_url: str, specs: list[CommandSpec], project_id: str | None = None
+    ) -> int:
+        existing_project = self.command_store.project_for_callback(callback_url)
+        registered_owners = {
+            reg.project_id
+            for reg in self.registry.all()
+            if reg.callback_url == callback_url and reg.project_id is not None
+        }
+        if project_id is not None and (
+            existing_project not in (None, project_id)
+            or (registered_owners and registered_owners != {project_id})
+        ):
+            raise PermissionError("callback URL is owned by another project")
         # Guild command sync replaces the entire guild set. Serialize updates
         # and keep every other project's definitions in the candidate tree.
         async with self._commands_lock:
@@ -1103,7 +1155,10 @@ class HubBot(discord.Client):
                     self.tree.add_command(command, guild=guild)
                 synced = await self.tree.sync(guild=guild)
                 await asyncio.to_thread(
-                    self.command_store.set_project_commands, callback_url, specs
+                    self.command_store.set_project_commands_for_project,
+                    callback_url,
+                    specs,
+                    project_id,
                 )
             except Exception:
                 self._rebuild_commands()
@@ -1118,9 +1173,10 @@ class HubBot(discord.Client):
         """Deliver a command invocation to its owning project. The project's
         HTTP response IS the interaction response (ADR 0003)."""
         interaction_id = str(interaction.id)
-        self._interactions[interaction_id] = (interaction, time.monotonic())
-        self.interaction_stats["received"] += 1
         callback_url = self.command_store.owner_of(spec.name)
+        project_id = self.command_store.project_of(spec.name)
+        self._interactions[interaction_id] = (interaction, time.monotonic(), project_id)
+        self.interaction_stats["received"] += 1
         logger.info(
             "interaction %s received: /%s by %s in channel %s -> %s",
             interaction_id,
@@ -1145,10 +1201,11 @@ class HubBot(discord.Client):
         }
         started = time.monotonic()
         try:
-            async with self._http.post(
+            async with self._post_callback(
                 callback_url,
-                json=event,
-                timeout=aiohttp.ClientTimeout(total=_CALLBACK_BUDGET_S),
+                event,
+                project_id=self.command_store.project_of(spec.name),
+                timeout=_CALLBACK_BUDGET_S,
             ) as resp:
                 status = resp.status
                 body = await resp.json(content_type=None)
@@ -1206,10 +1263,11 @@ class HubBot(discord.Client):
             "user": {"id": str(interaction.user.id), "name": interaction.user.display_name},
         }
         try:
-            async with self._http.post(
+            async with self._post_callback(
                 callback_url,
-                json=event,
-                timeout=aiohttp.ClientTimeout(total=_CALLBACK_BUDGET_S),
+                event,
+                project_id=self.command_store.project_of(spec.name),
+                timeout=_CALLBACK_BUDGET_S,
             ) as resp:
                 body = await resp.json(content_type=None)
         except (TimeoutError, aiohttp.ClientError):
@@ -1224,13 +1282,19 @@ class HubBot(discord.Client):
         return choices if isinstance(choices, list) else []
 
     async def interaction_followup(
-        self, interaction_id: str, text: str, ephemeral: bool = False
+        self,
+        interaction_id: str,
+        text: str,
+        ephemeral: bool = False,
+        project_id: str | None = None,
     ) -> dict:
         entry = self._interactions.get(interaction_id)
         if entry is None or time.monotonic() - entry[1] > _INTERACTION_TTL_S:
             self._interactions.pop(interaction_id, None)
             raise LookupError(f"Unknown or expired interaction {interaction_id}")
-        interaction, _ = entry
+        interaction, _, owner_project = entry
+        if project_id is not None and owner_project != project_id:
+            raise PermissionError("interaction is owned by another project")
         first_id = None
         for chunk in _chunks(text):
             message = await interaction.followup.send(chunk, ephemeral=ephemeral)
@@ -1252,16 +1316,37 @@ class HubBot(discord.Client):
 
     # -- voice (ADR 0005) --------------------------------------------------
 
-    async def voice_join(self, channel_id: int, owner: str) -> dict:
+    async def voice_join(
+        self, channel_id: int, owner: str, project_id: str | None = None
+    ) -> dict:
         try:
             channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         except discord.NotFound as exc:
             raise LookupError(f"Unknown channel {channel_id}") from exc
         if not isinstance(channel, discord.VoiceChannel):
             raise LookupError(f"Channel {channel_id} is not a voice channel")
-        return await self.voice.join(channel, owner)
+        return await self.voice.join(channel, owner, project_id)
 
     # -- registrations ----------------------------------------------------
+
+    async def require_channel_access(self, channel_id: int, project_id: str | None) -> None:
+        """Prevent one authenticated project using another project's route.
+
+        Legacy/operator callers pass None and retain their explicit rollout
+        privileges. Unknown channels are left to the operation's normal 404.
+        """
+        if project_id is None:
+            return
+        try:
+            channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        except discord.NotFound:
+            return
+        except discord.Forbidden:
+            return
+        registration_id = channel.parent_id if isinstance(channel, discord.Thread) else channel.id
+        reg = self.registry.get(registration_id)
+        if reg is not None and reg.project_id != project_id:
+            raise PermissionError("channel is registered to another project")
 
     async def register(
         self,
@@ -1274,6 +1359,7 @@ class HubBot(discord.Client):
         reaction_events: bool = False,
         allow_forum_moderation: bool = False,
         forum_events: bool = False,
+        project_id: str | None = None,
     ) -> Registration:
         async with self._registrations_lock:
             return await self._register_channel(
@@ -1286,6 +1372,7 @@ class HubBot(discord.Client):
                 reaction_events,
                 allow_forum_moderation,
                 forum_events,
+                project_id,
             )
 
     async def _register_channel(
@@ -1299,6 +1386,7 @@ class HubBot(discord.Client):
         reaction_events: bool = False,
         allow_forum_moderation: bool = False,
         forum_events: bool = False,
+        project_id: str | None = None,
     ) -> Registration:
         if self.registry.get(channel_id) is not None:
             raise ChannelTakenError(f"channel {channel_id} is already registered")
@@ -1317,6 +1405,7 @@ class HubBot(discord.Client):
             reaction_events=reaction_events,
             allow_forum_moderation=allow_forum_moderation,
             forum_events=forum_events,
+            project_id=project_id,
         )
         try:
             await asyncio.to_thread(self.registry.add, reg)

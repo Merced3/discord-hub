@@ -159,5 +159,71 @@ class StreamApiTests(unittest.TestCase):
         self.vc.disconnect.assert_awaited_once()
 
 
+class AuthenticatedStreamApiTests(unittest.TestCase):
+    def setUp(self):
+        temp = TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        settings = Settings(
+            _env_file=None,
+            discord_token="fake",
+            discord_guild_id=1,
+            hub_auth_mode="required",
+            hub_project_tokens={"a": "secret-a", "b": "secret-b"},
+        )
+        self.bot = HubBot(settings, Registry(root / "r.json"), CommandStore(root / "c.json"))
+        from discord.ext import voice_recv
+
+        self.vc = Mock(spec=voice_recv.VoiceRecvClient)
+        self.vc.is_connected = Mock(return_value=True)
+        self.vc.is_playing = Mock(return_value=False)
+        self.vc.play = Mock()
+        self.vc.stop = Mock()
+        self.vc.listen = Mock()
+        self.vc.stop_listening = Mock()
+        self.vc.disconnect = AsyncMock()
+        self.vc.move_to = AsyncMock()
+        import discord
+
+        self.channel = Mock(spec=discord.VoiceChannel)
+        self.channel.id, self.channel.guild = 55, SimpleNamespace(id=1)
+        self.channel.connect = AsyncMock(return_value=self.vc)
+        self.bot.get_channel = Mock(return_value=self.channel)
+        self.client = TestClient(create_api(self.bot, 0))
+        self.addCleanup(self.client.close)
+        self.a_headers = {"Authorization": "Bearer secret-a"}
+        self.b_headers = {"Authorization": "Bearer secret-b"}
+        response = self.client.post(
+            "/voice/join", headers=self.a_headers, json={"channel_id": 55, "owner": A}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.bot.voice._session.project_id, "a")
+
+    def test_http_and_websocket_require_and_enforce_project_identity(self):
+        self.assertEqual(self.client.post("/voice/leave", json={"owner": A}).status_code, 401)
+        response = self.client.post(
+            "/voice/join", headers=self.b_headers, json={"channel_id": 55, "owner": B}
+        )
+        self.assertEqual(response.status_code, 409)
+
+        try:
+            with self.client.websocket_connect(f"/voice/stream?owner={A}"):
+                self.fail("missing websocket token must be refused")
+        except Exception:
+            pass
+        try:
+            with self.client.websocket_connect(
+                f"/voice/stream?owner={A}", headers=self.b_headers
+            ):
+                self.fail("another project's websocket must be refused")
+        except Exception:
+            pass
+        with self.client.websocket_connect(
+            f"/voice/stream?owner={A}", headers=self.a_headers
+        ) as ws:
+            self.assertIsNotNone(self.bot.voice._session.stream)
+            ws.send_bytes(b"b" * _PCM_FRAME_BYTES)
+
+
 if __name__ == "__main__":
     unittest.main()

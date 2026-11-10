@@ -23,8 +23,29 @@ Discord ◄──► discord-hub ──POST events──► your callback server
 - **The hub** (`localhost:8100`) owns the bot connection, the webhook that
   carries your name/avatar, and the slash-command surface.
 - **Your callback server** receives inbound messages and command
-  invocations. Keep it fast: acknowledge within the documented budgets
-  (5s for messages, ~2.5s for commands) and do slow work in the background.
+  invocations. Verify the hub's callback signature, acknowledge within the
+  documented budgets (5s for messages, ~2.5s for commands), and do slow work
+  in the background.
+
+## Your project credential
+
+The hub operator gives your project a random token. Store it in your
+project's environment, never in source or logs. Send it on every hub call:
+
+```http
+Authorization: Bearer <project-token>
+```
+
+Use the same header when opening the voice WebSocket. The token identifies
+your project; it does not add a usage quota. See
+[`auth-rollout.md`](auth-rollout.md) for the gradual production rollout.
+
+Callbacks from the hub carry `X-Discord-Hub-Timestamp`,
+`X-Discord-Hub-Signature`, and `X-Discord-Hub-Project`. Before acting on an
+event, calculate HMAC-SHA256 using your token over
+`"<timestamp>.<exact-raw-body>"` and compare it with the signature using a
+constant-time comparison. Reject timestamps more than five minutes from
+your clock. Check the raw bytes before JSON parsing.
 
 ## The three steps to go live
 
@@ -146,11 +167,15 @@ yours; the hub just tells you it happened.
   request requires that, it's the wrong feature.
 - **No retries or queues** in the hub's delivery path. Callback failure is
   logged; your project decides what durability means for it.
-- **No authentication (yet).** The hub trusts localhost callers. Don't
-  expose its port; don't treat a registration as proof of identity.
+- **Authenticated identity.** Your bearer token tells the hub which project
+  is calling. Registration, command, interaction, channel, and voice
+  ownership are enforced against that identity.
+- **Verified callbacks.** The hub signs every callback with your project
+  token. Check the timestamp and signature before trusting an event.
+- **Private networking.** Local services bind locally; cross-machine access
+  uses Tailscale, never a public tunnel. Keep tokens out of URLs and logs.
 - **Permission-gated destruction.** Deletion requires your opt-in flag,
   owner confirmation, and Discord's own permissions (Manage Threads).
-- **Localhost trust model.** Binding to `127.0.0.1` is deliberate.
 
 ## Debugging checklist
 

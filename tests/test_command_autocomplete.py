@@ -79,7 +79,9 @@ class AutocompleteTests(unittest.IsolatedAsyncioTestCase):
         )
         choices = await self.bot._autocomplete(self.spec, _interaction(), "model", "gp")
         self.assertEqual(choices, [{"name": "gpt-5", "value": "gpt-5"}])
-        event = self.bot._http.post.call_args.kwargs["json"]
+        import json
+
+        event = json.loads(self.bot._http.post.call_args.kwargs["data"])
         self.assertEqual(event["type"], "autocomplete")
         self.assertEqual(event["command"], "model")
         self.assertEqual(event["option"], {"name": "model", "value": "gp"})

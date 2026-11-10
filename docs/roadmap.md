@@ -144,8 +144,12 @@ next hub task.
    (0.5.2a179, 2025-06) predates DAVE and upstream PR #58 is still open,
    so the PR-branch pin **stays**; re-check at the next upstream release.
 4. **VPS deployment (24/7 operation)** — ✅ done (hub runs on the
-   droplet; see the ops RUNBOOK). **Hub API key: decided against** —
-   Docker network + Tailscale is the auth boundary (ADR 0010).
+   droplet; see the ops RUNBOOK). **Cross-host project authentication** —
+   implemented offline under ADR 0011: per-project/operator bearer tokens,
+   enforced registration/channel/command/voice ownership, redacted
+   registration lists, signed callbacks, JSON/Postgres ownership migration,
+   and disabled→optional→required rollout. Consumer migrations, Tailscale
+   ACL changes, and live `/devlab` acceptance remain before `required` mode.
 2. ~~**Live two-consumer acceptance run**~~ ✅ done 2026-10-17 (see the
    workstream note above).
 3. **Caretaker proposals** — hub/agent proposes server-structure improvements;

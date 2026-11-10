@@ -51,6 +51,7 @@ class CommandStore:
         self._path = path
         self._database_url = database_url
         self._by_project: dict[str, list[CommandSpec]] = {}
+        self._project_ids: dict[str, str] = {}
         if database_url:
             from . import migrations
 
@@ -66,15 +67,24 @@ class CommandStore:
             with self._connect() as conn:
                 conn.execute("SET statement_timeout = 5000")
                 rows = conn.execute(
-                    "SELECT callback_url, spec FROM command_specs "
+                    "SELECT callback_url, spec, project_id FROM command_specs "
                     "ORDER BY callback_url, command_name"
                 ).fetchall()
-            for url, spec in rows:
+            for url, spec, project_id in rows:
                 self._by_project.setdefault(url, []).append(CommandSpec(**spec))
+                if project_id is not None:
+                    self._project_ids[url] = project_id
         elif self._path and self._path.exists():
             data = json.loads(self._path.read_text(encoding="utf-8"))
-            for url, specs in data.items():
-                self._by_project[url] = [CommandSpec(**s) for s in specs]
+            if data.get("version") == 2:
+                projects = data["projects"]
+                for url, record in projects.items():
+                    self._by_project[url] = [CommandSpec(**s) for s in record["commands"]]
+                    if record.get("project_id") is not None:
+                        self._project_ids[url] = record["project_id"]
+            else:
+                for url, specs in data.items():
+                    self._by_project[url] = [CommandSpec(**s) for s in specs]
         logger.info("loaded commands for %d project(s)", len(self._by_project))
 
     def _save(self) -> None:
@@ -82,7 +92,16 @@ class CommandStore:
             raise RuntimeError("Postgres writes use per-operation transactions")
         assert self._path is not None
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {url: [asdict(s) for s in specs] for url, specs in self._by_project.items()}
+        data = {
+            "version": 2,
+            "projects": {
+                url: {
+                    "project_id": self._project_ids.get(url),
+                    "commands": [asdict(s) for s in specs],
+                }
+                for url, specs in self._by_project.items()
+            },
+        }
         temporary = self._path.with_suffix(".tmp")
         temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
         temporary.replace(self._path)
@@ -92,6 +111,42 @@ class CommandStore:
             if any(s.name == name for s in specs):
                 return url
         return None
+
+    def project_of(self, name: str) -> str | None:
+        url = self.owner_of(name)
+        return self._project_ids.get(url) if url is not None else None
+
+    def project_for_callback(self, callback_url: str) -> str | None:
+        return self._project_ids.get(callback_url)
+
+    def unowned(self) -> list[str]:
+        return [url for url in self._by_project if url not in self._project_ids]
+
+    def unowned_command_names(self) -> list[str]:
+        return sorted(
+            spec.name
+            for url in self.unowned()
+            for spec in self._by_project[url]
+        )
+
+    def backfill_projects(self, callback_projects: dict[str, str]) -> None:
+        changed = {
+            url: callback_projects[url]
+            for url in self.unowned()
+            if url in callback_projects
+        }
+        if not changed:
+            return
+        if self._database_url:
+            with self._connect() as conn, conn.transaction():
+                for url, project_id in changed.items():
+                    conn.execute(
+                        "UPDATE command_specs SET project_id = %s WHERE callback_url = %s",
+                        (project_id, url),
+                    )
+        self._project_ids.update(changed)
+        if not self._database_url:
+            self._save()
 
     def validate_project_commands(self, callback_url: str, specs: list[CommandSpec]) -> None:
         """Check ownership without changing the currently published routes."""
@@ -108,9 +163,19 @@ class CommandStore:
                 )
 
     def set_project_commands(self, callback_url: str, specs: list[CommandSpec]) -> None:
+        self.set_project_commands_for_project(callback_url, specs, None)
+
+    def set_project_commands_for_project(
+        self, callback_url: str, specs: list[CommandSpec], project_id: str | None
+    ) -> None:
         """Replace a project's set after validation and successful Discord sync."""
         self.validate_project_commands(callback_url, specs)
         previous = self._by_project
+        previous_ids = self._project_ids.copy()
+        effective_project = project_id or self._project_ids.get(callback_url)
+        self._by_project = {**previous, callback_url: specs}
+        if effective_project is not None:
+            self._project_ids[callback_url] = effective_project
         if self._database_url:
             try:
                 with self._connect() as conn, conn.transaction():
@@ -124,16 +189,28 @@ class CommandStore:
                     )
                     for spec in specs:
                         conn.execute(
-                            "INSERT INTO command_specs VALUES (%s, %s, %s)",
-                            (spec.name, callback_url, Jsonb(asdict(spec))),
+                            "INSERT INTO command_specs "
+                            "(command_name, callback_url, spec, project_id) "
+                            "VALUES (%s, %s, %s, %s)",
+                            (spec.name, callback_url, Jsonb(asdict(spec)), effective_project),
                         )
             except psycopg.errors.UniqueViolation as exc:
+                self._by_project = previous
+                self._project_ids = previous_ids
                 raise CommandNameTakenError(
                     "a command name is already owned by another project"
                 ) from exc
+            except Exception:
+                self._by_project = previous
+                self._project_ids = previous_ids
+                raise
         else:
-            self._save()
-        self._by_project = {**previous, callback_url: specs}
+            try:
+                self._save()
+            except Exception:
+                self._by_project = previous
+                self._project_ids = previous_ids
+                raise
 
     def all(self) -> dict[str, list[CommandSpec]]:
         return dict(self._by_project)

@@ -8,8 +8,10 @@ from dataclasses import asdict
 
 import discord
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from .auth import LEGACY_PRINCIPAL, AuthenticationError, Principal
 from .bot import HubBot
 from .commands import CommandNameTakenError, CommandSpec
 from .registry import ChannelTakenError
@@ -48,6 +50,7 @@ class CreateForumPostRequest(BaseModel):
 class RegisterRequest(BaseModel):
     channel_id: int
     callback_url: str
+    project_id: str | None = None  # operator restores only; projects use their token
     display_name: str | None = None
     avatar_url: str | None = None
     allow_thread_deletion: bool = False
@@ -112,6 +115,30 @@ class VoiceOwnerRequest(BaseModel):
 def create_api(bot: HubBot, started_at: float) -> FastAPI:
     app = FastAPI(title="discord-hub", version="0.1.0")
 
+    @app.middleware("http")
+    async def authenticate_request(request: Request, call_next):
+        if request.url.path == "/health":
+            return await call_next(request)
+        try:
+            request.state.principal = bot.auth.authenticate(
+                request.headers.get("Authorization")
+            )
+        except AuthenticationError:
+            return JSONResponse(status_code=401, content={"detail": "valid bearer token required"})
+        return await call_next(request)
+
+    def _principal(request: Request) -> Principal:
+        return getattr(request.state, "principal", LEGACY_PRINCIPAL)
+
+    def _project(request: Request) -> str | None:
+        return _principal(request).project_id
+
+    async def _authorize_channel(request: Request, channel_id: int) -> None:
+        try:
+            await bot.require_channel_access(channel_id, _project(request))
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
     @app.get("/health")
     async def health() -> dict:
         return {
@@ -122,7 +149,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         }
 
     @app.post("/messages", status_code=201)
-    async def send_message(body: SendMessageRequest) -> dict:
+    async def send_message(body: SendMessageRequest, request: Request) -> dict:
+        await _authorize_channel(request, body.channel_id)
         try:
             return await bot.send_message(body.channel_id, body.text, body.reply_to_message_id)
         except LookupError as exc:
@@ -133,10 +161,11 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             ) from exc
 
     @app.patch("/messages/{message_id}")
-    async def edit_message(message_id: int, body: EditMessageRequest) -> dict:
+    async def edit_message(message_id: int, body: EditMessageRequest, request: Request) -> dict:
         """Edit a message the hub previously sent. The caller supplies the
         message id it stored from the send response; the hub keeps no
         message history."""
+        await _authorize_channel(request, body.channel_id)
         try:
             return await bot.edit_message(body.channel_id, message_id, body.text)
         except ValueError as exc:
@@ -167,9 +196,14 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(
                 status_code=422, detail="channel_id and filename query parameters required"
             )
+        try:
+            parsed_channel_id = int(channel_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid channel_id") from exc
         data = await request.body()
         if not data:
             raise HTTPException(status_code=422, detail="empty file body")
+        await _authorize_channel(request, parsed_channel_id)
         # Adaptive cap (ADR 0008): looked up live from the guild's boost
         # tier, so a boost raises the limit with no restart or code edit.
         cap = bot.tier_limit("attachment_bytes")
@@ -201,7 +235,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             ) from exc
 
     @app.post("/threads", status_code=201)
-    async def create_thread(body: CreateThreadRequest) -> dict:
+    async def create_thread(body: CreateThreadRequest, request: Request) -> dict:
+        await _authorize_channel(request, body.channel_id)
         try:
             return await bot.create_thread(body.channel_id, body.name)
         except LookupError as exc:
@@ -212,7 +247,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             ) from exc
 
     @app.delete("/threads/{thread_id}", status_code=204)
-    async def delete_thread(thread_id: int) -> Response:
+    async def delete_thread(thread_id: int, request: Request) -> Response:
+        await _authorize_channel(request, thread_id)
         try:
             await bot.delete_thread(thread_id)
         except (LookupError, discord.NotFound) as exc:
@@ -226,7 +262,10 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         return Response(status_code=204)
 
     @app.post("/threads/{thread_id}/archive")
-    async def archive_thread(thread_id: int, body: ArchiveThreadRequest | None = None) -> dict:
+    async def archive_thread(
+        thread_id: int, request: Request, body: ArchiveThreadRequest | None = None
+    ) -> dict:
+        await _authorize_channel(request, thread_id)
         archived = True if body is None else body.archived
         locked = False if body is None else body.locked
         try:
@@ -242,10 +281,12 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
 
     @app.get("/forums/{channel_id}/posts")
     async def forum_posts(
+        request: Request,
         channel_id: int,
         include_archived: bool = Query(default=False),
         limit: int = Query(default=50, ge=1, le=100),
     ) -> dict:
+        await _authorize_channel(request, channel_id)
         try:
             return await bot.forum_posts(channel_id, include_archived, limit)
         except LookupError as exc:
@@ -258,7 +299,10 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             ) from exc
 
     @app.post("/forums/{channel_id}/posts", status_code=201)
-    async def create_forum_post(channel_id: int, body: CreateForumPostRequest) -> dict:
+    async def create_forum_post(
+        channel_id: int, body: CreateForumPostRequest, request: Request
+    ) -> dict:
+        await _authorize_channel(request, channel_id)
         try:
             return await bot.create_forum_post(channel_id, body.title, body.text, body.tag_ids)
         except ValueError as exc:
@@ -273,7 +317,10 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             ) from exc
 
     @app.patch("/forums/posts/{post_id}")
-    async def update_forum_post(post_id: int, body: UpdateForumPostRequest) -> dict:
+    async def update_forum_post(
+        post_id: int, body: UpdateForumPostRequest, request: Request
+    ) -> dict:
+        await _authorize_channel(request, post_id)
         try:
             return await bot.update_forum_post(
                 post_id, body.title, body.tag_ids, body.archived, body.locked, body.pinned
@@ -290,7 +337,10 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             ) from exc
 
     @app.post("/forums/{channel_id}/tags", status_code=201)
-    async def create_forum_tag(channel_id: int, body: CreateForumTagRequest) -> dict:
+    async def create_forum_tag(
+        channel_id: int, body: CreateForumTagRequest, request: Request
+    ) -> dict:
+        await _authorize_channel(request, channel_id)
         try:
             return await bot.create_forum_tag(channel_id, body.name, body.moderated)
         except LookupError as exc:
@@ -301,7 +351,10 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(status_code=502, detail="Discord could not create the tag") from exc
 
     @app.patch("/forums/{channel_id}/tags/{tag_id}")
-    async def update_forum_tag(channel_id: int, tag_id: int, body: UpdateForumTagRequest) -> dict:
+    async def update_forum_tag(
+        channel_id: int, tag_id: int, body: UpdateForumTagRequest, request: Request
+    ) -> dict:
+        await _authorize_channel(request, channel_id)
         try:
             return await bot.update_forum_tag(channel_id, tag_id, body.name, body.moderated)
         except ValueError as exc:
@@ -314,7 +367,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             raise HTTPException(status_code=502, detail="Discord could not update the tag") from exc
 
     @app.delete("/forums/{channel_id}/tags/{tag_id}", status_code=204)
-    async def delete_forum_tag(channel_id: int, tag_id: int) -> Response:
+    async def delete_forum_tag(channel_id: int, tag_id: int, request: Request) -> Response:
+        await _authorize_channel(request, channel_id)
         try:
             await bot.delete_forum_tag(channel_id, tag_id)
         except LookupError as exc:
@@ -326,7 +380,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         return Response(status_code=204)
 
     @app.get("/forums/posts/{post_id}")
-    async def forum_post(post_id: int) -> dict:
+    async def forum_post(post_id: int, request: Request) -> dict:
+        await _authorize_channel(request, post_id)
         try:
             return await bot.forum_post(post_id)
         except (LookupError, discord.NotFound) as exc:
@@ -340,10 +395,12 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
 
     @app.get("/channels/{channel_id}/history")
     async def channel_history(
+        request: Request,
         channel_id: int,
         limit: int = Query(default=50, ge=1, le=100),
         before: int | None = Query(default=None, gt=0),
     ) -> dict:
+        await _authorize_channel(request, channel_id)
         try:
             return await bot.channel_history(channel_id, limit, before)
         except (LookupError, discord.NotFound) as exc:
@@ -356,7 +413,8 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             ) from exc
 
     @app.post("/channels/{channel_id}/typing", status_code=202)
-    async def trigger_typing(channel_id: int) -> Response:
+    async def trigger_typing(channel_id: int, request: Request) -> Response:
+        await _authorize_channel(request, channel_id)
         try:
             await bot.trigger_typing(channel_id)
         except LookupError as exc:
@@ -364,14 +422,15 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         return Response(status_code=202)
 
     @app.get("/channels/{channel_id}/permissions")
-    async def channel_permissions(channel_id: int) -> dict:
+    async def channel_permissions(channel_id: int, request: Request) -> dict:
+        await _authorize_channel(request, channel_id)
         try:
             return bot.channel_permissions(channel_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.put("/commands")
-    async def set_commands(body: SetCommandsRequest) -> dict:
+    async def set_commands(request: Request, body: SetCommandsRequest) -> dict:
         specs = [
             CommandSpec(
                 name=c.name,
@@ -381,9 +440,11 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             for c in body.commands
         ]
         try:
-            synced = await bot.set_commands(body.callback_url, specs)
+            synced = await bot.set_commands(body.callback_url, specs, _project(request))
         except CommandNameTakenError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except discord.Forbidden as exc:
@@ -395,18 +456,43 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         return {"synced": synced}
 
     @app.post("/interactions/{interaction_id}/followups", status_code=201)
-    async def interaction_followup(interaction_id: str, body: FollowupRequest) -> dict:
+    async def interaction_followup(
+        interaction_id: str, body: FollowupRequest, request: Request
+    ) -> dict:
         try:
-            return await bot.interaction_followup(interaction_id, body.text, body.ephemeral)
+            return await bot.interaction_followup(
+                interaction_id, body.text, body.ephemeral, _project(request)
+            )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @app.get("/registrations")
-    async def list_registrations() -> list[dict]:
-        return [asdict(r) for r in bot.registry.all()]
+    async def list_registrations(request: Request) -> list[dict]:
+        principal = _principal(request)
+        registrations = bot.registry.all()
+        if principal.project_id is not None:
+            registrations = [
+                reg for reg in registrations if reg.project_id == principal.project_id
+            ]
+        return [
+            {key: value for key, value in asdict(reg).items() if key != "webhook_url"}
+            for reg in registrations
+        ]
 
     @app.post("/registrations", status_code=201)
-    async def register(body: RegisterRequest) -> dict:
+    async def register(body: RegisterRequest, request: Request) -> dict:
+        principal = _principal(request)
+        project_id = principal.project_id
+        if principal.operator:
+            project_id = body.project_id
+            if project_id is None:
+                raise HTTPException(
+                    status_code=422, detail="operator registration requires project_id"
+                )
+            if project_id not in bot.settings.hub_project_tokens:
+                raise HTTPException(status_code=422, detail="unknown project_id")
         try:
             reg = await bot.register(
                 body.channel_id,
@@ -418,6 +504,7 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
                 body.reaction_events,
                 body.allow_forum_moderation,
                 body.forum_events,
+                project_id,
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -430,7 +517,15 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         return asdict(reg)
 
     @app.delete("/registrations/{channel_id}", status_code=204)
-    async def deregister(channel_id: int) -> Response:
+    async def deregister(channel_id: int, request: Request) -> Response:
+        principal = _principal(request)
+        reg = bot.registry.get(channel_id)
+        if (
+            principal.project_id is not None
+            and reg is not None
+            and reg.project_id != principal.project_id
+        ):
+            raise HTTPException(status_code=403, detail="channel registered to another project")
         reg = await bot.deregister(channel_id)
         if reg is None:
             raise HTTPException(status_code=404, detail="channel not registered")
@@ -451,26 +546,26 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         return bot.voice.status()
 
     @app.post("/voice/join")
-    async def voice_join(body: VoiceJoinRequest) -> dict:
+    async def voice_join(body: VoiceJoinRequest, request: Request) -> dict:
         try:
-            return await bot.voice_join(body.channel_id, body.owner)
+            return await bot.voice_join(body.channel_id, body.owner, _project(request))
         except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
             raise _voice_errors(exc) from exc
         except discord.HTTPException as exc:
             raise HTTPException(status_code=502, detail="Discord could not connect voice") from exc
 
     @app.post("/voice/leave", status_code=204)
-    async def voice_leave(body: VoiceOwnerRequest) -> Response:
+    async def voice_leave(body: VoiceOwnerRequest, request: Request) -> Response:
         try:
-            await bot.voice.leave(body.owner)
+            await bot.voice.leave(body.owner, _project(request))
         except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
             raise _voice_errors(exc) from exc
         return Response(status_code=204)
 
     @app.post("/voice/stop", status_code=204)
-    async def voice_stop(body: VoiceOwnerRequest) -> Response:
+    async def voice_stop(body: VoiceOwnerRequest, request: Request) -> Response:
         try:
-            await bot.voice.stop(body.owner)
+            await bot.voice.stop(body.owner, _project(request))
         except (VoiceBusyError, NotVoiceOwnerError, LookupError) as exc:
             raise _voice_errors(exc) from exc
         return Response(status_code=204)
@@ -485,7 +580,7 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         if not pcm:
             raise HTTPException(status_code=422, detail="empty audio body")
         try:
-            await bot.voice.play_pcm(owner, pcm)
+            await bot.voice.play_pcm(owner, pcm, _project(request))
         except (VoiceBusyError, NotVoiceOwnerError, LookupError, StreamTakenError) as exc:
             raise _voice_errors(exc) from exc
         return Response(status_code=202)
@@ -502,12 +597,17 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         played continuously (silence-filled when the buffer is empty).
         One stream per voice connection; a second attach is refused.
         """
+        try:
+            principal = bot.auth.authenticate(websocket.headers.get("Authorization"))
+        except AuthenticationError:
+            await websocket.close(code=1008, reason="valid bearer token required")
+            return
         owner = websocket.query_params.get("owner")
         if not owner:
             await websocket.close(code=1008, reason="owner query parameter required")
             return
         try:
-            stream = await bot.voice.open_stream(owner)
+            stream = await bot.voice.open_stream(owner, principal.project_id)
         except NotVoiceOwnerError:
             await websocket.close(code=1008, reason="voice connection owned by another project")
             return

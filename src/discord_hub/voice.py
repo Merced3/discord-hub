@@ -84,6 +84,7 @@ class VoiceSession:
     owner: str
     channel_id: int
     client: voice_recv.VoiceRecvClient
+    project_id: str | None = None
     stream: VoiceStream | None = None
 
 
@@ -195,33 +196,45 @@ class VoiceManager:
             "channel_id": str(self._session.channel_id),
         }
 
-    async def join(self, channel: discord.VoiceChannel, owner: str) -> dict:
+    async def join(
+        self, channel: discord.VoiceChannel, owner: str, project_id: str | None = None
+    ) -> dict:
         if channel.guild.id != self._guild_id:
             raise LookupError(f"Voice channel {channel.id} is outside the configured server")
         async with self._lock:
             if self._session is not None and self._session.client.is_connected():
-                if self._session.owner != owner:
+                same_owner = (
+                    self._session.project_id == project_id
+                    if project_id is not None
+                    else self._session.owner == owner
+                )
+                if not same_owner:
                     raise VoiceBusyError(f"voice connection is owned by {self._session.owner}")
                 if self._session.channel_id != channel.id:
                     await self._session.client.move_to(channel)
                     self._session.channel_id = channel.id
             else:
                 client = await channel.connect(cls=voice_recv.VoiceRecvClient)
-                self._session = VoiceSession(owner=owner, channel_id=channel.id, client=client)
+                self._session = VoiceSession(
+                    owner=owner, channel_id=channel.id, client=client, project_id=project_id
+                )
             logger.info("voice joined channel %s for %s", channel.id, owner)
             return self.status()
 
-    def _require_owner(self, owner: str) -> VoiceSession:
+    def _require_owner(self, owner: str, project_id: str | None = None) -> VoiceSession:
         session = self._session
         if session is None or not session.client.is_connected():
             raise LookupError("No active voice connection")
-        if session.owner != owner:
+        same_owner = (
+            session.project_id == project_id if project_id is not None else session.owner == owner
+        )
+        if not same_owner:
             raise NotVoiceOwnerError(f"voice connection is owned by {session.owner}")
         return session
 
-    async def leave(self, owner: str) -> None:
+    async def leave(self, owner: str, project_id: str | None = None) -> None:
         async with self._lock:
-            session = self._require_owner(owner)
+            session = self._require_owner(owner, project_id)
             if session.stream is not None:
                 session.stream.close()
                 session.stream = None
@@ -229,8 +242,10 @@ class VoiceManager:
             self._session = None
             logger.info("voice left (owner %s)", owner)
 
-    async def play_pcm(self, owner: str, pcm: bytes) -> None:
-        session = self._require_owner(owner)
+    async def play_pcm(
+        self, owner: str, pcm: bytes, project_id: str | None = None
+    ) -> None:
+        session = self._require_owner(owner, project_id)
         if session.stream is not None:
             raise StreamTakenError(
                 "a duplex stream is attached; send audio through the stream instead"
@@ -241,16 +256,18 @@ class VoiceManager:
         session.client.play(source)
         logger.info("playing %d PCM bytes for %s", len(pcm), owner)
 
-    async def stop(self, owner: str) -> None:
-        session = self._require_owner(owner)
+    async def stop(self, owner: str, project_id: str | None = None) -> None:
+        session = self._require_owner(owner, project_id)
         session.client.stop()
 
     # -- duplex stream (Stage 2, ADR 0005) ---------------------------------
 
-    async def open_stream(self, owner: str) -> VoiceStream:
+    async def open_stream(
+        self, owner: str, project_id: str | None = None
+    ) -> VoiceStream:
         """Attach the one allowed duplex stream to the active connection."""
         async with self._lock:
-            session = self._require_owner(owner)
+            session = self._require_owner(owner, project_id)
             if session.stream is not None:
                 raise StreamTakenError("a stream is already attached to this voice connection")
             loop = asyncio.get_running_loop()
@@ -260,9 +277,9 @@ class VoiceManager:
             logger.info("voice stream opened for %s", owner)
             return stream
 
-    async def close_stream(self, owner: str) -> None:
+    async def close_stream(self, owner: str, project_id: str | None = None) -> None:
         async with self._lock:
-            session = self._require_owner(owner)
+            session = self._require_owner(owner, project_id)
             if session.stream is not None:
                 session.stream.close()
                 session.stream = None

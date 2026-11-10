@@ -47,7 +47,8 @@ Incoming Discord messages are delivered to the project that registered
 for that channel, via a webhook-style callback.
 
 See `docs/integrating.md` for the consumer guide, `docs/api.md` for the full
-contract, and `docs/architecture.md` for how it works inside.
+contract, `docs/auth-rollout.md` for cross-host authentication rollout, and
+`docs/architecture.md` for how it works inside.
 
 ## Running it
 

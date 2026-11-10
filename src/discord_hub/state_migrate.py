@@ -91,7 +91,8 @@ def migrate_state(data_dir: str | Path, database_url: str) -> dict[str, Any]:
                 for item in specs:
                     spec = CommandSpec(**item)
                     cursor = conn.execute(
-                        "INSERT INTO command_specs VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                        "INSERT INTO command_specs (command_name, callback_url, spec) "
+                        "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
                         (spec.name, callback_url, Jsonb(asdict(spec))),
                     )
                     inserted += cursor.rowcount

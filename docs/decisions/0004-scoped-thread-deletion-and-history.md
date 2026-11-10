@@ -26,12 +26,11 @@ backup/collection tools. Reading messages does not make the hub an archive.
 - Discord permissions still apply (Manage Threads); the hub never grants
   itself permissions.
 
-This is declared intent, NOT independently verified consent. The API has no
-caller authentication: any local caller could register with the flag set.
-The real guardrail is the consumer asking the owner before each deletion;
-the flag exists to make intent explicit and prevent accidents. If untrusted
-clients or remote API access are ever introduced, add authenticated/scoped
-access before relying on this boundary.
+This is declared intent, NOT independently verified consent. ADR 0011 adds
+authenticated project callers and enforces registration ownership, but it
+does not prove the human approved an individual deletion. The consumer must
+still ask the owner before each deletion; the flag makes intent explicit and
+prevents accidents.
 
 ## Failure contract
 
