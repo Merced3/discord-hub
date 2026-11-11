@@ -13,6 +13,7 @@ import uvicorn
 from automation_harness import Harness, HarnessConfig, ServiceContext
 
 from .api import create_api
+from .archive import PostgresArchiveStore
 from .bot import HubBot
 from .commands import CommandStore
 from .config import Settings
@@ -43,7 +44,12 @@ async def hub_service(ctx: ServiceContext) -> None:
                 "required auth cannot start with unowned state: "
                 f"channels={unowned_channels}, commands={unowned_commands}"
             )
-    bot = HubBot(settings, registry, command_store)
+    archive = (
+        PostgresArchiveStore(settings.discord_hub_database_url)
+        if settings.archive_channel_ids
+        else None
+    )
+    bot = HubBot(settings, registry, command_store, archive=archive)
     bot.ready_event = asyncio.Event()
 
     api = create_api(bot, started_at=time.time())

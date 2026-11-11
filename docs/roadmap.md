@@ -137,6 +137,12 @@ next hub task.
   remain disposable. Schema revision `0001_hub_state` establishes the hub's
   migration chain; P4a adds archive tables separately.
 
+- [x] **Documented Self source archive (P4a, ADR 0012)** — owner-allowlisted
+  channels/forums; append-only create/edit/delete/reaction/thread events;
+  raw Discord `jsonb`; R2 attachment bytes; resumable idempotent backfill;
+  authenticated per-project read API with mandatory 🔒 exclusion. Offline
+  verified; production enablement and live LAB/backfill acceptance remain.
+
 ## Backlog (full picture, with expectations)
 
 1. **Voice receive/streaming + speaking events** — ✅ done (Stage 2,
@@ -169,5 +175,6 @@ next hub task.
 
 - Multi-guild support (the hub serves one server; revisit only if a real
   second server appears)
-- Archive storage, retention policies, and consumer database cleanup. Read-only
-  message-history access is now planned; archival policy remains outside the hub.
+- Automatic retention/deletion policies and consumer database cleanup. Raw
+  source archive capture is now in scope under ADR 0012; source deletion still
+  requires a separate owner-approved policy. Interpretation remains outside the hub.

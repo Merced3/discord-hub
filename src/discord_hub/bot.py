@@ -6,11 +6,13 @@ import asyncio
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
 import discord
 
+from .archive import ArchiveEvent
 from .auth import HubAuth
 from .capabilities import tier_limit as _tier_limit
 from .commands import CommandSpec, CommandStore, build_command
@@ -210,7 +212,9 @@ class HubBot(discord.Client):
     """A minimal Discord client. Features are added here as methods the
     API layer can call, keeping all Discord knowledge in this class."""
 
-    def __init__(self, settings: Settings, registry: Registry, command_store: CommandStore) -> None:
+    def __init__(
+        self, settings: Settings, registry: Registry, command_store: CommandStore, archive=None
+    ) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
         intents.messages = True
@@ -226,6 +230,8 @@ class HubBot(discord.Client):
         )
         self.registry = registry
         self.command_store = command_store
+        self.archive = archive
+        self._archive_raw: dict[tuple[Any, ...], dict[str, Any]] = {}
         self.tree = discord.app_commands.CommandTree(self)
         self.ready_event: asyncio.Event  # assigned in main before startup
         self._http: aiohttp.ClientSession  # created in setup_hook
@@ -263,6 +269,36 @@ class HubBot(discord.Client):
             allow_redirects=allow_redirects,
         )
 
+    async def on_socket_response(self, payload: dict[str, Any]) -> None:
+        """Retain the exact gateway JSON until discord.py invokes its handler."""
+        kind = payload.get("t")
+        data = payload.get("d") or {}
+        keys = {
+            "MESSAGE_CREATE": ("message", data.get("id")),
+            "MESSAGE_UPDATE": ("message", data.get("id")),
+            "MESSAGE_DELETE": ("delete", data.get("id")),
+            "MESSAGE_REACTION_ADD": (
+                "reaction",
+                data.get("message_id"),
+                data.get("user_id"),
+                "added",
+            ),
+            "MESSAGE_REACTION_REMOVE": (
+                "reaction",
+                data.get("message_id"),
+                data.get("user_id"),
+                "removed",
+            ),
+            "THREAD_CREATE": ("thread-create", data.get("id")),
+            "THREAD_UPDATE": ("thread-update", data.get("id")),
+            "THREAD_DELETE": ("thread-delete", data.get("id")),
+        }
+        if kind in keys and self.archive is not None:
+            self._archive_raw[keys[kind]] = data
+            # A missed/failed handler must not grow this cache indefinitely.
+            if len(self._archive_raw) > 2048:
+                self._archive_raw.pop(next(iter(self._archive_raw)))
+
     async def setup_hook(self) -> None:
         self._http = aiohttp.ClientSession()
         self.tree.on_error = self._on_command_error
@@ -280,9 +316,206 @@ class HubBot(discord.Client):
         logger.info("Connected to Discord as %s", self.user)
         self.ready_event.set()
 
+    # -- archive: lossless capture, independent of consumer callbacks ------
+
+    async def _archive_root_channel(self, channel_id: int) -> int | None:
+        """Return the allowlisted parent, or this channel, without interpreting it."""
+        if self.archive is None:
+            return None
+        if channel_id in self.settings.archive_channel_ids:
+            return channel_id
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await self.fetch_channel(channel_id)
+            except (LookupError, discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return None
+        parent_id = getattr(channel, "parent_id", None)
+        return parent_id if parent_id in self.settings.archive_channel_ids else None
+
+    async def _archive_record(self, event: ArchiveEvent) -> None:
+        try:
+            await self.archive.record(event)
+        except Exception:
+            # Capture failures are observable but cannot alter signed callback traffic.
+            logger.exception(
+                "archive %s capture failed for channel %s", event.event_type, event.channel_id
+            )
+
+    async def archive_attachments(self, message: discord.Message) -> list[dict[str, Any]]:
+        if not message.attachments or self.archive is None:
+            return []
+        from .attachments import ArchiveAttachmentStore
+
+        objects = ArchiveAttachmentStore(self.settings)
+        saved = []
+        for attachment in message.attachments:
+            async with self._http.get(attachment.url) as response:
+                response.raise_for_status()
+                data = await response.read()
+            saved.append(await objects.save(attachment, message_id=message.id, data=data))
+        return saved
+
+    async def _capture_message(
+        self,
+        message: discord.Message,
+        kind: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        raw: dict | None = None,
+        dedupe_key: str | None = None,
+    ) -> None:
+        if await self._archive_root_channel(message.channel.id) is None:
+            return
+        raw = raw if raw is not None else self._archive_raw.pop(("message", str(message.id)), {})
+        try:
+            attachments = await self.archive_attachments(message)
+            await self.archive.upsert_message(
+                message_id=message.id,
+                channel_id=message.channel.id,
+                parent_channel_id=getattr(message.channel, "parent_id", None),
+                author={
+                    "id": str(message.author.id),
+                    "name": message.author.display_name,
+                    "bot": message.author.bot,
+                },
+                content=message.content,
+                created_at=message.created_at,
+                edited_at=message.edited_at,
+                raw=raw,
+                attachments=attachments,
+            )
+            await self._archive_record(
+                ArchiveEvent(
+                    event_type=kind,
+                    channel_id=message.channel.id,
+                    message_id=message.id,
+                    actor_id=message.author.id,
+                    payload=payload or {"text": message.content},
+                    raw=raw,
+                    occurred_at=message.edited_at or message.created_at,
+                    dedupe_key=dedupe_key
+                    or (f"message:{message.id}:created" if kind == "message_created" else None),
+                )
+            )
+        except Exception:
+            logger.exception("archive message capture failed for %s", message.id)
+
+    async def _capture_thread(
+        self, thread: discord.Thread, kind: str, before: discord.Thread | None = None
+    ) -> None:
+        if await self._archive_root_channel(thread.id) is None:
+            return
+        raw = self._archive_raw.pop((f"thread-{kind.removeprefix('thread_')}", str(thread.id)), {})
+        payload: dict[str, Any] = {
+            "id": str(thread.id),
+            "name": thread.name,
+            "parent_channel_id": str(thread.parent_id),
+        }
+        if before is not None:
+            payload["changed"] = [
+                name
+                for name in ("name", "archived", "locked")
+                if getattr(before, name) != getattr(thread, name)
+            ]
+        await self._archive_record(
+            ArchiveEvent(
+                event_type=kind,
+                channel_id=thread.id,
+                occurred_at=datetime.now(UTC),
+                payload=payload,
+                raw=raw,
+                dedupe_key=f"{kind}:{thread.id}" if kind != "thread_updated" else None,
+            )
+        )
+
+    async def backfill_archive(self, channel_id: int, *, max_messages: int = 500) -> dict[str, Any]:
+        """One bounded, idempotent page-run. Checkpoints survive restarts."""
+        if channel_id not in self.settings.archive_channel_ids:
+            raise LookupError("channel is not in the archive allowlist")
+        if not 1 <= max_messages <= 5000:
+            raise ValueError("max_messages must be 1..5000")
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        targets = [channel]
+        if isinstance(channel, discord.ForumChannel):
+            targets = list(channel.threads)
+            async for thread in channel.archived_threads(limit=100):
+                if thread not in targets:
+                    targets.append(thread)
+        seen = 0
+        complete = True
+        before: int | None = None
+        for target in targets:
+            state = await self.archive.checkpoint(target.id)
+            if state and state["complete"]:
+                continue
+            before = int(state["next_before"]) if state and state["next_before"] else None
+            while seen < max_messages:
+                limit = min(100, max_messages - seen)
+                raw_rows = await self.http.logs_from(
+                    target.id, limit=limit, before=discord.Object(id=before) if before else None
+                )
+                for raw in raw_rows:
+                    message = discord.Message(state=self._connection, channel=target, data=raw)
+                    await self._capture_message(
+                        message,
+                        "message_created",
+                        raw=raw,
+                        dedupe_key=f"message:{message.id}:created",
+                    )
+                    if message.edited_at:
+                        await self._archive_record(
+                            ArchiveEvent(
+                                event_type="message_edited",
+                                channel_id=target.id,
+                                message_id=message.id,
+                                actor_id=message.author.id,
+                                payload={"before_text": None, "after_text": message.content},
+                                raw=raw,
+                                occurred_at=message.edited_at,
+                                dedupe_key=f"backfill:edit:{message.id}:{raw.get('edited_timestamp')}",
+                            )
+                        )
+                    await self._backfill_reactions(message, raw)
+                seen += len(raw_rows)
+                if raw_rows:
+                    before = int(raw_rows[-1]["id"])
+                await self.archive.save_checkpoint(target.id, before, len(raw_rows) < limit)
+                if len(raw_rows) < limit:
+                    break
+                complete = False
+            if seen >= max_messages:
+                complete = False
+                break
+        return {
+            "channel_id": str(channel_id),
+            "messages_seen": seen,
+            "complete": complete,
+            "next_before": str(before) if before else None,
+        }
+
+    async def _backfill_reactions(self, message: discord.Message, raw: dict[str, Any]) -> None:
+        for reaction in message.reactions:
+            if str(reaction.emoji).replace("\ufe0f", "") not in {"🔄", "🔒", "⭐"}:
+                continue
+            async for user in reaction.users():
+                await self._archive_record(
+                    ArchiveEvent(
+                        event_type="reaction_added",
+                        channel_id=message.channel.id,
+                        message_id=message.id,
+                        actor_id=user.id,
+                        emoji=str(reaction.emoji),
+                        occurred_at=message.created_at,
+                        raw=raw,
+                        dedupe_key=f"backfill:reaction:{message.id}:{user.id}:{reaction.emoji}",
+                    )
+                )
+
     # -- inbound: Discord -> registered project --------------------------
 
     async def on_message(self, message: discord.Message) -> None:
+        await self._capture_message(message, "message_created")
         if message.author.bot:  # ignore bots and our own webhook sends
             return
         thread_info = None
@@ -328,6 +561,24 @@ class HubBot(discord.Client):
         on_raw_message_edit covers the rest."""
         await self._route_message_edit(after, before_text=before.content)
 
+    async def on_raw_message_delete(self, event: discord.RawMessageDeleteEvent) -> None:
+        if event.guild_id != self.settings.discord_guild_id:
+            return
+        channel_id = await self._archive_root_channel(event.channel_id)
+        if channel_id is None:
+            return
+        raw = self._archive_raw.pop(("delete", str(event.message_id)), {})
+        await self._archive_record(
+            ArchiveEvent(
+                event_type="message_deleted",
+                channel_id=event.channel_id,
+                message_id=event.message_id,
+                occurred_at=datetime.now(UTC),
+                raw=raw,
+                dedupe_key=f"delete:{event.message_id}",
+            )
+        )
+
     async def on_raw_message_edit(self, event: discord.RawMessageUpdateEvent) -> None:
         """Fires for every edit. When the original was cached,
         on_message_edit already handled it — skip those to avoid double
@@ -353,6 +604,11 @@ class HubBot(discord.Client):
         """Deliver every edit to the channel's registered project, like
         on_message. The hub is stateless about edits: each one is its own
         event, so an archiver can replay the full before/after chain."""
+        await self._capture_message(
+            message,
+            "message_edited",
+            payload={"before_text": before_text, "after_text": message.content},
+        )
         if message.author.bot:  # same rule as message callbacks
             return
         thread_info = None
@@ -447,6 +703,27 @@ class HubBot(discord.Client):
     async def _route_reaction_marker(
         self, event: discord.RawReactionActionEvent, action: str
     ) -> None:
+        if event.guild_id == self.settings.discord_guild_id:
+            channel_id = await self._archive_root_channel(event.channel_id)
+            if channel_id is not None and str(event.emoji).replace("\ufe0f", "") in {
+                "🔄",
+                "🔒",
+                "⭐",
+            }:
+                raw = self._archive_raw.pop(
+                    ("reaction", str(event.message_id), str(event.user_id), action), {}
+                )
+                await self._archive_record(
+                    ArchiveEvent(
+                        event_type=f"reaction_{action}",
+                        channel_id=event.channel_id,
+                        message_id=event.message_id,
+                        actor_id=event.user_id,
+                        emoji=str(event.emoji),
+                        occurred_at=datetime.now(UTC),
+                        raw=raw,
+                    )
+                )
         """Route configured-emoji reactions to projects that opted in
         (`reaction_events` on their registration). Raw events fire for any
         message in the server regardless of cache age, so marks work on
@@ -539,6 +816,7 @@ class HubBot(discord.Client):
         return reg if reg is not None and reg.forum_events else None
 
     async def on_thread_create(self, thread: discord.Thread) -> None:
+        await self._capture_thread(thread, "thread_created")
         reg = self._forum_events_reg(thread)
         if reg is None:
             return
@@ -547,6 +825,7 @@ class HubBot(discord.Client):
         await self._deliver_forum_event(reg, payload)
 
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread) -> None:
+        await self._capture_thread(after, "thread_updated", before=before)
         reg = self._forum_events_reg(after)
         if reg is None:
             return
@@ -568,6 +847,7 @@ class HubBot(discord.Client):
         await self._deliver_forum_event(reg, payload)
 
     async def on_thread_delete(self, thread: discord.Thread) -> None:
+        await self._capture_thread(thread, "thread_deleted")
         reg = self._forum_events_reg(thread)
         if reg is None:
             return
@@ -1316,9 +1596,7 @@ class HubBot(discord.Client):
 
     # -- voice (ADR 0005) --------------------------------------------------
 
-    async def voice_join(
-        self, channel_id: int, owner: str, project_id: str | None = None
-    ) -> dict:
+    async def voice_join(self, channel_id: int, owner: str, project_id: str | None = None) -> dict:
         try:
             channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         except discord.NotFound as exc:
