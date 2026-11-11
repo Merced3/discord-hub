@@ -453,7 +453,7 @@ class HubBot(discord.Client):
             while seen < max_messages:
                 limit = min(100, max_messages - seen)
                 raw_rows = await self.http.logs_from(
-                    target.id, limit=limit, before=discord.Object(id=before) if before else None
+                    target.id, limit=limit, before=before
                 )
                 for raw in raw_rows:
                     message = discord.Message(state=self._connection, channel=target, data=raw)
@@ -481,11 +481,10 @@ class HubBot(discord.Client):
                 if raw_rows:
                     before = int(raw_rows[-1]["id"])
                 await self.archive.save_checkpoint(target.id, before, len(raw_rows) < limit)
+                complete = len(raw_rows) < limit
                 if len(raw_rows) < limit:
                     break
-                complete = False
             if seen >= max_messages:
-                complete = False
                 break
         return {
             "channel_id": str(channel_id),
