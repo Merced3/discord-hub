@@ -140,8 +140,10 @@ next hub task.
 - [x] **Documented Self source archive (P4a, ADR 0012)** — owner-allowlisted
   channels/forums; append-only create/edit/delete/reaction/thread events;
   raw Discord `jsonb`; R2 attachment bytes; resumable idempotent backfill;
-  authenticated per-project read API with mandatory 🔒 exclusion. Offline
-  verified; production enablement and live LAB/backfill acceptance remain.
+  authenticated per-project read API with mandatory 🔒 exclusion. Live-verified
+  in LAB (post/edit/reaction/lock/delete + attachment round-trip); real-channel
+  backfills reconciled 5/5 quotes and 932/932 timeline messages. All nine
+  personal/Judgment channels/forums are enabled; LAB is excluded after cleanup.
 
 ## Backlog (full picture, with expectations)
 
