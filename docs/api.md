@@ -639,6 +639,54 @@ message sent before the hub last restarted, `before_text` is `null` —
 treat it as "unknown prior state", not "was empty". The event still
 tells you which message changed and what it became.
 
+## Source archive (ADR 0012)
+
+Capture is disabled unless `ARCHIVE_CHANNEL_IDS` names explicit text/forum IDs.
+Threads inherit their parent's capture setting. Registration is unrelated:
+capturing a channel does not route it, and routing it does not capture it.
+Postgres retains raw Discord `jsonb` and an append-only event chain; attachment
+bytes are immutable R2 objects. Capture never changes existing callback bodies
+or signatures.
+
+### `GET /archive/messages?channel_id=123&limit=50&before=123`
+
+Newest-first current message projections. `channel_id` is optional; without it,
+read only the caller's explicitly granted channels. `limit` is 1–100 and
+`before` is an exclusive Discord message ID. The response is `{items,
+next_before}`; continue while `next_before` is non-null. Records include source
+IDs/provenance, author, text, UTC timestamps, deletion state, and attachment
+metadata, never raw transport payloads or Discord CDN URLs.
+
+### `GET /archive/events?channel_id=123&limit=100&before=456`
+
+Append-only `message_created`, `message_edited`, `message_deleted`,
+`reaction_added`/`reaction_removed` (🔄 🔒 ⭐), and thread lifecycle events.
+Edits retain every before/after pair. `before` here is an exclusive archive
+event ID, not a Discord message ID. The response is `{items, next_before}`.
+Raw gateway/REST payloads remain internal.
+
+Both reads require a project token listed in `ARCHIVE_READER_CHANNELS`; the
+operator can read all captured channels. Tokenless legacy callers have no
+archive access. A request naming a channel outside its grant gets `403`.
+**While any user's 🔒 reaction is active, that message, all its events, and its
+attachments are absent from every downstream response.** Removing the last lock
+restores read access. The hub does not interpret the other markers.
+
+### `GET /archive/attachments/{attachment_id}`
+
+Authenticated bytes from R2 with the captured media type. The same channel
+grant and 🔒 exclusion apply; absent/private objects return `404`.
+
+### `POST /archive/backfill/{channel_id}?max_messages=500`
+
+Operator only. One bounded (1–5000 messages), resumable, idempotent backfill.
+Returns `{channel_id, messages_seen, complete, next_before}`. Repeat until
+`complete`; a full final Discord page may require one empty request. A forum
+enumerates active plus bounded archived posts and checkpoints each thread.
+Backfill preserves REST raw payloads and current marker reactions. Discord
+cannot provide historical edits/deletions that predate capture, so backfilled
+edits use `before_text: null`; no prior content is invented.
+
 ## Versioning rule
 
 Additive changes (new endpoints, new optional fields) are always fine.

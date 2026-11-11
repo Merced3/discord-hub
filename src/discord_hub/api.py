@@ -120,9 +120,7 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         if request.url.path == "/health":
             return await call_next(request)
         try:
-            request.state.principal = bot.auth.authenticate(
-                request.headers.get("Authorization")
-            )
+            request.state.principal = bot.auth.authenticate(request.headers.get("Authorization"))
         except AuthenticationError:
             return JSONResponse(status_code=401, content={"detail": "valid bearer token required"})
         return await call_next(request)
@@ -147,6 +145,81 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
             "uptime_seconds": int(time.time() - started_at),
             "interactions": bot.interaction_stats,
         }
+
+    def _archive_access(request: Request, channel_id: int | None = None) -> list[int]:
+        if bot.archive is None:
+            raise HTTPException(status_code=404, detail="archive is not configured")
+        principal = _principal(request)
+        channels = (
+            bot.settings.archive_channel_ids
+            if principal.operator
+            else (bot.settings.archive_reader_channels.get(principal.project_id or "", []))
+        )
+        if not channels:
+            # Never let tokenless legacy rollout mode become archive access.
+            raise HTTPException(status_code=403, detail="project has no archive read grant")
+        if channel_id is not None and channel_id not in channels:
+            raise HTTPException(
+                status_code=403, detail="channel is outside this project's archive grant"
+            )
+        return channels
+
+    @app.get("/archive/messages")
+    async def archive_messages(
+        request: Request,
+        channel_id: int | None = None,
+        limit: int = Query(default=50, ge=1, le=100),
+        before: int | None = Query(default=None, gt=0),
+    ) -> dict:
+        channels = _archive_access(request, channel_id)
+        if channel_id is not None:
+            channels = [channel_id]
+        return await bot.archive.messages(channels, limit=limit, before=before)
+
+    @app.get("/archive/events")
+    async def archive_events(
+        request: Request,
+        channel_id: int | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+        before: int | None = Query(default=None, gt=0),
+    ) -> dict:
+        channels = _archive_access(request, channel_id)
+        if channel_id is not None:
+            channels = [channel_id]
+        items = await bot.archive.events(channels, limit=limit + 1, before=before)
+        return {
+            "items": items[:limit],
+            "next_before": items[limit - 1]["id"] if len(items) > limit else None,
+        }
+
+    @app.get("/archive/attachments/{attachment_id}")
+    async def archive_attachment(attachment_id: int, request: Request) -> Response:
+        metadata = await bot.archive.attachment(attachment_id) if bot.archive else None
+        if metadata is None:
+            raise HTTPException(status_code=404, detail="attachment not found")
+        _archive_access(request, int(metadata["channel_id"]))
+        from .attachments import ArchiveAttachmentStore
+
+        data, content_type = await ArchiveAttachmentStore(bot.settings).read(metadata["object_key"])
+        return Response(content=data, media_type=content_type or "application/octet-stream")
+
+    @app.post("/archive/backfill/{channel_id}")
+    async def archive_backfill(
+        channel_id: int,
+        request: Request,
+        max_messages: int = Query(default=500, ge=1, le=5000),
+    ) -> dict:
+        if not _principal(request).operator:
+            raise HTTPException(status_code=403, detail="backfill requires the operator token")
+        _archive_access(request, channel_id)
+        try:
+            return await bot.backfill_archive(channel_id, max_messages=max_messages)
+        except (LookupError, discord.NotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (PermissionError, discord.Forbidden) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except discord.HTTPException as exc:
+            raise HTTPException(status_code=502, detail="Discord backfill failed") from exc
 
     @app.post("/messages", status_code=201)
     async def send_message(body: SendMessageRequest, request: Request) -> dict:
@@ -473,9 +546,7 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         principal = _principal(request)
         registrations = bot.registry.all()
         if principal.project_id is not None:
-            registrations = [
-                reg for reg in registrations if reg.project_id == principal.project_id
-            ]
+            registrations = [reg for reg in registrations if reg.project_id == principal.project_id]
         return [
             {key: value for key, value in asdict(reg).items() if key != "webhook_url"}
             for reg in registrations
