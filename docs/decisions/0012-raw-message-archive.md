@@ -4,8 +4,8 @@ Date: 2026-11-11
 
 ## Status
 
-Accepted for implementation; owner selected an authenticated hub read API over
-direct consumer database access.
+Accepted and live-verified 2026-11-11; owner selected an authenticated hub read
+API over direct consumer database access.
 
 ## Context
 

@@ -100,7 +100,7 @@ idempotent and keeps the hub in sync after restarts.
 - `POST /messages` — send text. Auto-chunks long messages. Optional
   `reply_to_message_id`. Uses your webhook identity when the channel is
   registered to you. **Store the returned `id`** if you ever want to
-  edit the message later; the hub keeps no message history.
+  edit the message later; channel history is separate from the opt-in archive.
 - `PATCH /messages/{id}` — edit a message you sent (body: `channel_id`,
   `text`). Works for both bot-path and webhook-path sends. Single
   message, no chunking: max 2000 characters.
@@ -126,6 +126,20 @@ idempotent and keeps the hub in sync after restarts.
   callback gets `{"type": "autocomplete", "option": {"name", "value"}}`
   and must answer `{"choices": [{"name", "value"}]}` (max 25) within ~3s.
   On error the hub returns an empty list for you.
+
+## Reading the source archive
+
+Archive reads are separate from registration and live Discord history. If the
+owner grants your project channels in `ARCHIVE_READER_CHANNELS`, use
+`GET /archive/messages` and `GET /archive/events` with your normal bearer token.
+Paginate with each response's `next_before`. `GET /archive/attachments/{id}`
+returns the stored bytes. Parent-channel grants include their threads, while
+source thread IDs remain in each record.
+
+The API never exposes raw Discord payloads. A message with any active 🔒 marker
+and all its events/attachments are excluded. Do not treat this source record as
+an interpretation: your project owns retrieval, summaries, and meaning. See
+[`api.md`](api.md#source-archive-adr-0012) and ADR 0012.
 
 ## Voice
 
