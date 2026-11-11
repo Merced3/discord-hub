@@ -206,8 +206,39 @@ class ArchiveBotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.store.messages([10], limit=10))["items"]), 2)
         self.assertEqual(len(await self.store.events([10], limit=10)), 2)
         self.assertEqual(self.bot.http.logs_from.await_count, 3)
-        second_call = self.bot.http.logs_from.await_args_list[1]
-        self.assertIs(type(second_call.kwargs["before"]), int)
+        calls = self.bot.http.logs_from.await_args_list
+        self.assertIs(type(calls[1].kwargs["before"]), int)
+        self.assertEqual(calls[1].kwargs["before"], 51)
+        self.assertEqual(calls[2].kwargs["before"], 50)
+
+    async def test_multiple_discord_pages_within_one_backfill_invocation(self):
+        import discord
+
+        channel = Mock(spec=discord.TextChannel)
+        channel.id = 10
+        self.bot.get_channel = Mock(return_value=channel)
+        self.bot.http = SimpleNamespace(logs_from=AsyncMock())
+
+        def raw(mid):
+            return {
+                "id": str(mid),
+                "channel_id": "10",
+                "content": "entry",
+                "author": {"id": "7", "username": "Human", "discriminator": "0", "avatar": None},
+                "timestamp": NOW.isoformat(),
+                "type": 0,
+            }
+
+        self.bot.http.logs_from.side_effect = [
+            [raw(mid) for mid in range(300, 200, -1)],
+            [raw(mid) for mid in range(200, 100, -1)],
+            [],
+        ]
+        result = await self.bot.backfill_archive(10, max_messages=250)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["messages_seen"], 200)
+        calls = self.bot.http.logs_from.await_args_list
+        self.assertEqual([call.kwargs["before"] for call in calls], [None, 201, 101])
 
     async def test_cached_edit_captures_before_after_once(self):
         await self.bot.on_message_edit(self.message("A"), self.message("B"))
