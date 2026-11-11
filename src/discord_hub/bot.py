@@ -232,6 +232,7 @@ class HubBot(discord.Client):
         self.command_store = command_store
         self.archive = archive
         self._archive_raw: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self._install_archive_raw_parsers()
         self.tree = discord.app_commands.CommandTree(self)
         self.ready_event: asyncio.Event  # assigned in main before startup
         self._http: aiohttp.ClientSession  # created in setup_hook
@@ -269,8 +270,31 @@ class HubBot(discord.Client):
             allow_redirects=allow_redirects,
         )
 
-    async def on_socket_response(self, payload: dict[str, Any]) -> None:
-        """Retain the exact gateway JSON until discord.py invokes its handler."""
+    def _install_archive_raw_parsers(self) -> None:
+        """Wrap discord.py's real parser table; it has no on_socket_response event."""
+        kinds = (
+            "MESSAGE_CREATE",
+            "MESSAGE_UPDATE",
+            "MESSAGE_DELETE",
+            "MESSAGE_REACTION_ADD",
+            "MESSAGE_REACTION_REMOVE",
+            "THREAD_CREATE",
+            "THREAD_UPDATE",
+            "THREAD_DELETE",
+        )
+        for kind in kinds:
+            original = self._connection.parsers.get(kind)
+            if original is None:
+                continue
+
+            def wrapped(data: dict[str, Any], *, original=original, kind=kind):
+                self._retain_archive_raw({"t": kind, "d": data})
+                return original(data)
+
+            self._connection.parsers[kind] = wrapped
+
+    def _retain_archive_raw(self, payload: dict[str, Any]) -> None:
+        """Retain exact gateway JSON until discord.py invokes its async handler."""
         kind = payload.get("t")
         data = payload.get("d") or {}
         keys = {
@@ -452,9 +476,7 @@ class HubBot(discord.Client):
             before = int(state["next_before"]) if state and state["next_before"] else None
             while seen < max_messages:
                 limit = min(100, max_messages - seen)
-                raw_rows = await self.http.logs_from(
-                    target.id, limit=limit, before=before
-                )
+                raw_rows = await self.http.logs_from(target.id, limit=limit, before=before)
                 for raw in raw_rows:
                     message = discord.Message(state=self._connection, channel=target, data=raw)
                     await self._capture_message(
