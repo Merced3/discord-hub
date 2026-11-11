@@ -150,10 +150,20 @@ class ArchiveBotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_raw_gateway_payload_is_retained_but_not_public(self):
         raw = {"id": "50", "content": "A", "discord_only": {"exact": True}}
-        await self.bot.on_socket_response({"t": "MESSAGE_CREATE", "d": raw})
+        self.bot._retain_archive_raw({"t": "MESSAGE_CREATE", "d": raw})
         await self.bot.on_message(self.message())
         self.assertEqual(self.store._messages[50]["raw"], raw)
         self.assertNotIn("raw", (await self.store.messages([10], limit=10))["items"][0])
+
+    async def test_real_parser_table_retains_raw_gateway_payload(self):
+        original = Mock()
+        self.bot._connection.parsers["MESSAGE_DELETE"] = original
+        self.bot._install_archive_raw_parsers()
+        parser = self.bot._connection.parsers["MESSAGE_DELETE"]
+        raw = {"id": "50", "channel_id": "10", "guild_id": "1"}
+        parser(raw)
+        original.assert_called_once_with(raw)
+        self.assertEqual(self.bot._archive_raw[("delete", "50")], raw)
 
     async def test_backfill_is_bounded_resumable_and_idempotent(self):
         import discord
