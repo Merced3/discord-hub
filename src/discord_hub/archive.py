@@ -22,6 +22,7 @@ class ArchiveEvent:
     event_type: str
     channel_id: int
     occurred_at: datetime
+    scope_channel_id: int | None = None
     message_id: int | None = None
     actor_id: int | None = None
     emoji: str | None = None
@@ -68,10 +69,21 @@ class MemoryArchiveStore:
             "created_at": created_at,
             "edited_at": edited_at,
             "raw": _json(raw),
-            "private": old.get("private", False),
+            "private": self._is_private(message_id),
             "deleted": False,
             "attachments": _json(attachments or old.get("attachments", [])),
         }
+
+    def _is_private(self, message_id: int) -> bool:
+        locks: dict[int, bool] = {}
+        for past in self._events:
+            if (
+                past["message_id"] == str(message_id)
+                and past["emoji"]
+                and past["emoji"].replace("\ufe0f", "") == "🔒"
+            ):
+                locks[int(past["actor_id"])] = past["event_type"] == "reaction_added"
+        return any(locks.values())
 
     async def record(self, event: ArchiveEvent) -> int | None:
         if event.dedupe_key and event.dedupe_key in self._dedupe:
@@ -85,6 +97,7 @@ class MemoryArchiveStore:
                 "id": event_id,
                 "event_type": event.event_type,
                 "channel_id": str(event.channel_id),
+                "scope_channel_id": str(event.scope_channel_id or event.channel_id),
                 "message_id": str(event.message_id) if event.message_id else None,
                 "actor_id": str(event.actor_id) if event.actor_id else None,
                 "emoji": event.emoji,
@@ -95,15 +108,7 @@ class MemoryArchiveStore:
         )
         message = self._messages.get(event.message_id) if event.message_id else None
         if message is not None and event.emoji and event.emoji.replace("\ufe0f", "") == "🔒":
-            locks: dict[int, bool] = {}
-            for past in self._events:
-                if (
-                    past["message_id"] == str(event.message_id)
-                    and past["emoji"]
-                    and past["emoji"].replace("\ufe0f", "") == "🔒"
-                ):
-                    locks[int(past["actor_id"])] = past["event_type"] == "reaction_added"
-            message["private"] = any(locks.values())
+            message["private"] = self._is_private(event.message_id)
         if message is not None and event.event_type == "message_deleted":
             message["deleted"] = True
         return event_id
@@ -115,7 +120,7 @@ class MemoryArchiveStore:
         rows = [
             m
             for m in self._messages.values()
-            if m["channel_id"] in wanted
+            if wanted.intersection({m["channel_id"], m["parent_channel_id"]})
             and not m["private"]
             and (before is None or int(m["id"]) < before)
         ]
@@ -136,7 +141,7 @@ class MemoryArchiveStore:
         rows = [
             e
             for e in self._events
-            if e["channel_id"] in wanted
+            if e["scope_channel_id"] in wanted
             and (include_private or not e["message_id"] or int(e["message_id"]) not in private_ids)
             and (before is None or e["id"] < before)
         ]
@@ -148,7 +153,10 @@ class MemoryArchiveStore:
                 continue
             for attachment in message["attachments"]:
                 if attachment["id"] == str(attachment_id):
-                    return {**attachment, "channel_id": message["channel_id"]}
+                    return {
+                        **attachment,
+                        "channel_id": message["parent_channel_id"] or message["channel_id"],
+                    }
         return None
 
     async def checkpoint(self, channel_id: int) -> dict[str, Any] | None:
@@ -197,6 +205,19 @@ class PostgresArchiveStore:
                         "attachments": Jsonb(values.get("attachments") or []),
                     },
                 )
+                cur.execute(
+                    """UPDATE archive_messages SET private=EXISTS (
+                    SELECT 1 FROM archive_events added
+                    WHERE added.message_id=%s AND added.event_type='reaction_added'
+                    AND replace(added.emoji, U&'\\FE0F', '')='🔒'
+                    AND NOT EXISTS (SELECT 1 FROM archive_events removed
+                      WHERE removed.message_id=added.message_id
+                      AND removed.actor_id=added.actor_id
+                      AND replace(removed.emoji, U&'\\FE0F', '')='🔒'
+                      AND removed.event_type='reaction_removed' AND removed.id>added.id))
+                    WHERE message_id=%s""",
+                    (values["message_id"], values["message_id"]),
+                )
 
         await asyncio.to_thread(write)
 
@@ -205,13 +226,15 @@ class PostgresArchiveStore:
             with self._connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO archive_events
-                    (event_type, channel_id, message_id, actor_id, emoji, payload, raw,
-                     occurred_at, dedupe_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (event_type, channel_id, scope_channel_id, message_id, actor_id,
+                     emoji, payload, raw, occurred_at, dedupe_key)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
                     RETURNING id""",
                     (
                         event.event_type,
                         event.channel_id,
+                        event.scope_channel_id or event.channel_id,
                         event.message_id,
                         event.actor_id,
                         event.emoji,
@@ -259,10 +282,11 @@ class PostgresArchiveStore:
                 cur.execute(
                     """SELECT message_id AS id, channel_id, parent_channel_id, author,
                      content AS text, created_at, edited_at, deleted_at, attachments
-                     FROM archive_messages WHERE channel_id = ANY(%s) AND NOT private
+                     FROM archive_messages
+                     WHERE (channel_id = ANY(%s) OR parent_channel_id = ANY(%s)) AND NOT private
                      AND (%s::bigint IS NULL OR message_id < %s)
                      ORDER BY message_id DESC LIMIT %s""",
-                    (channel_ids, before, before, limit + 1),
+                    (channel_ids, channel_ids, before, before, limit + 1),
                 )
                 rows = cur.fetchall()
                 items = [_string_ids(row) for row in rows[:limit]]
@@ -290,7 +314,7 @@ class PostgresArchiveStore:
                     """SELECT e.id, e.event_type, e.channel_id, e.message_id, e.actor_id,
                      e.emoji, e.payload, e.occurred_at FROM archive_events e
                      LEFT JOIN archive_messages m ON m.message_id=e.message_id
-                     WHERE e.channel_id = ANY(%s)
+                     WHERE e.scope_channel_id = ANY(%s)
                      AND (%s OR e.message_id IS NULL OR m.message_id IS NULL OR NOT m.private)
                      AND (%s::bigint IS NULL OR e.id < %s)
                      ORDER BY e.id DESC LIMIT %s""",
@@ -304,7 +328,8 @@ class PostgresArchiveStore:
         def read() -> dict[str, Any] | None:
             with self._connect() as conn, conn.cursor() as cur:
                 cur.execute(
-                    """SELECT m.channel_id, a.value AS attachment FROM archive_messages m
+                    """SELECT COALESCE(m.parent_channel_id, m.channel_id) AS channel_id,
+                     a.value AS attachment FROM archive_messages m
                     CROSS JOIN LATERAL jsonb_array_elements(m.attachments) a(value)
                     WHERE a.value->>'id'=%s AND NOT m.private""",
                     (str(attachment_id),),

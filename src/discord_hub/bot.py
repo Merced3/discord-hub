@@ -365,11 +365,18 @@ class HubBot(discord.Client):
         raw: dict | None = None,
         dedupe_key: str | None = None,
     ) -> None:
-        if await self._archive_root_channel(message.channel.id) is None:
+        root_channel_id = await self._archive_root_channel(message.channel.id)
+        if root_channel_id is None:
             return
         raw = raw if raw is not None else self._archive_raw.pop(("message", str(message.id)), {})
         try:
-            attachments = await self.archive_attachments(message)
+            try:
+                attachments = await self.archive_attachments(message)
+            except Exception:
+                attachments = None
+                logger.exception(
+                    "attachment capture failed for message %s; retaining text", message.id
+                )
             await self.archive.upsert_message(
                 message_id=message.id,
                 channel_id=message.channel.id,
@@ -389,11 +396,16 @@ class HubBot(discord.Client):
                 ArchiveEvent(
                     event_type=kind,
                     channel_id=message.channel.id,
+                    scope_channel_id=root_channel_id,
                     message_id=message.id,
                     actor_id=message.author.id,
                     payload=payload or {"text": message.content},
                     raw=raw,
-                    occurred_at=message.edited_at or message.created_at,
+                    occurred_at=(
+                        message.created_at
+                        if kind == "message_created"
+                        else message.edited_at or message.created_at
+                    ),
                     dedupe_key=dedupe_key
                     or (f"message:{message.id}:created" if kind == "message_created" else None),
                 )
@@ -404,7 +416,8 @@ class HubBot(discord.Client):
     async def _capture_thread(
         self, thread: discord.Thread, kind: str, before: discord.Thread | None = None
     ) -> None:
-        if await self._archive_root_channel(thread.id) is None:
+        root_channel_id = await self._archive_root_channel(thread.id)
+        if root_channel_id is None:
             return
         raw = self._archive_raw.pop((f"thread-{kind.removeprefix('thread_')}", str(thread.id)), {})
         payload: dict[str, Any] = {
@@ -422,6 +435,7 @@ class HubBot(discord.Client):
             ArchiveEvent(
                 event_type=kind,
                 channel_id=thread.id,
+                scope_channel_id=root_channel_id,
                 occurred_at=datetime.now(UTC),
                 payload=payload,
                 raw=raw,
@@ -468,6 +482,7 @@ class HubBot(discord.Client):
                             ArchiveEvent(
                                 event_type="message_edited",
                                 channel_id=target.id,
+                                scope_channel_id=getattr(target, "parent_id", None) or target.id,
                                 message_id=message.id,
                                 actor_id=message.author.id,
                                 payload={"before_text": None, "after_text": message.content},
@@ -503,6 +518,9 @@ class HubBot(discord.Client):
                     ArchiveEvent(
                         event_type="reaction_added",
                         channel_id=message.channel.id,
+                        scope_channel_id=(
+                            getattr(message.channel, "parent_id", None) or message.channel.id
+                        ),
                         message_id=message.id,
                         actor_id=user.id,
                         emoji=str(reaction.emoji),
@@ -573,6 +591,7 @@ class HubBot(discord.Client):
                 event_type="message_deleted",
                 channel_id=event.channel_id,
                 message_id=event.message_id,
+                scope_channel_id=channel_id,
                 occurred_at=datetime.now(UTC),
                 raw=raw,
                 dedupe_key=f"delete:{event.message_id}",
@@ -720,6 +739,7 @@ class HubBot(discord.Client):
                         message_id=event.message_id,
                         actor_id=event.user_id,
                         emoji=str(event.emoji),
+                        scope_channel_id=channel_id,
                         occurred_at=datetime.now(UTC),
                         raw=raw,
                     )

@@ -186,10 +186,11 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         channels = _archive_access(request, channel_id)
         if channel_id is not None:
             channels = [channel_id]
-        items = await bot.archive.events(channels, limit=limit + 1, before=before)
+        rows = await bot.archive.events(channels, limit=limit + 1, before=before)
+        items = rows[-limit:]
         return {
-            "items": items[:limit],
-            "next_before": items[limit - 1]["id"] if len(items) > limit else None,
+            "items": items,
+            "next_before": items[0]["id"] if len(rows) > limit else None,
         }
 
     @app.get("/archive/attachments/{attachment_id}")

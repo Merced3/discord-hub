@@ -38,6 +38,7 @@ def upgrade() -> None:
             id BIGSERIAL PRIMARY KEY,
             event_type TEXT NOT NULL,
             channel_id BIGINT NOT NULL,
+            scope_channel_id BIGINT NOT NULL,
             message_id BIGINT,
             actor_id BIGINT,
             emoji TEXT,
@@ -56,7 +57,7 @@ def upgrade() -> None:
         "CREATE UNIQUE INDEX idx_archive_events_dedupe "
         "ON archive_events (dedupe_key) WHERE dedupe_key IS NOT NULL"
     )
-    op.execute("CREATE INDEX idx_archive_events_channel ON archive_events (channel_id, id)")
+    op.execute("CREATE INDEX idx_archive_events_channel ON archive_events (scope_channel_id, id)")
     op.execute("CREATE INDEX idx_archive_events_message ON archive_events (message_id, id)")
     op.execute("""
         CREATE TABLE archive_backfills (

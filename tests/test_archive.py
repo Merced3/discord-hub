@@ -69,6 +69,21 @@ class ArchiveStoreTests(unittest.IsolatedAsyncioTestCase):
         await self.store.record(event("reaction_removed", emoji="🔒", actor_id=7))
         self.assertEqual(len((await self.store.messages([10], limit=100))["items"]), 1)
 
+    async def test_reaction_before_message_row_still_hides_it(self):
+        await self.store.record(event("reaction_added", message_id=51, emoji="🔒", actor_id=7))
+        await self.store.upsert_message(
+            message_id=51,
+            channel_id=10,
+            parent_channel_id=None,
+            author={"id": "7"},
+            content="secret",
+            created_at=NOW,
+            edited_at=None,
+            raw={},
+        )
+        visible_ids = {item["id"] for item in (await self.store.messages([10], limit=10))["items"]}
+        self.assertNotIn("51", visible_ids)
+
     async def test_one_users_unlock_does_not_expose_another_users_lock(self):
         await self.store.record(event("reaction_added", emoji="🔒", actor_id=7))
         await self.store.record(event("reaction_added", emoji="🔒", actor_id=8))
@@ -76,6 +91,30 @@ class ArchiveStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.messages([10], limit=10))["items"], [])
         await self.store.record(event("reaction_removed", emoji="🔒", actor_id=8))
         self.assertEqual(len((await self.store.messages([10], limit=10))["items"]), 1)
+
+    async def test_thread_records_use_parent_read_scope_and_keep_thread_provenance(self):
+        await self.store.upsert_message(
+            message_id=51,
+            channel_id=11,
+            parent_channel_id=10,
+            author={"id": "7"},
+            content="thread",
+            created_at=NOW,
+            edited_at=None,
+            raw={},
+        )
+        await self.store.record(
+            event(
+                "message_created",
+                message_id=51,
+                channel_id=11,
+                scope_channel_id=10,
+            )
+        )
+        page = await self.store.messages([10], limit=10)
+        self.assertEqual(page["items"][0]["channel_id"], "11")
+        self.assertEqual(page["items"][0]["parent_channel_id"], "10")
+        self.assertEqual((await self.store.events([10], limit=10))[0]["channel_id"], "11")
 
     async def test_idempotency_and_bounded_cursor(self):
         key = "backfill:10:50"
@@ -196,6 +235,10 @@ class ArchiveBotTests(unittest.IsolatedAsyncioTestCase):
             [],  # a full final page requires one empty request to prove completion
         ]
         first = await self.bot.backfill_archive(10, max_messages=1)
+        self.assertEqual(
+            (await self.store.events([10], limit=10))[0]["occurred_at"],
+            str(discord.utils.snowflake_time(51)),
+        )
         self.assertFalse(first["complete"])
         second = await self.bot.backfill_archive(10, max_messages=1)
         self.assertFalse(second["complete"])
@@ -206,6 +249,14 @@ class ArchiveBotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.store.messages([10], limit=10))["items"]), 2)
         self.assertEqual(len(await self.store.events([10], limit=10)), 2)
         self.assertEqual(self.bot.http.logs_from.await_count, 3)
+
+    async def test_attachment_failure_does_not_drop_text_event(self):
+        self.bot.archive_attachments = AsyncMock(side_effect=OSError("R2 unavailable"))
+        await self.bot.on_message(self.message())
+        self.assertEqual((await self.store.messages([10], limit=10))["items"][0]["text"], "A")
+        self.assertEqual(
+            (await self.store.events([10], limit=10))[0]["event_type"], "message_created"
+        )
 
     async def test_cached_edit_captures_before_after_once(self):
         await self.bot.on_message_edit(self.message("A"), self.message("B"))
@@ -320,6 +371,20 @@ class ArchiveApiTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.get(path, headers=headers)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["items"], [])
+
+    async def test_event_cursor_does_not_drop_or_repeat_latest_event(self):
+        await self.store.record(event("message_edited", payload={"n": 1}))
+        await self.store.record(event("message_edited", payload={"n": 2}))
+        response = await self.client.get(
+            "/archive/events?channel_id=10&limit=2", headers={"Authorization": "Bearer token"}
+        )
+        body = response.json()
+        self.assertEqual([item["payload"] for item in body["items"]], [{"n": 1}, {"n": 2}])
+        older = await self.client.get(
+            f"/archive/events?channel_id=10&limit=2&before={body['next_before']}",
+            headers={"Authorization": "Bearer token"},
+        )
+        self.assertEqual([item["payload"] for item in older.json()["items"]], [{"text": "visible"}])
 
     async def test_auth_required_and_backfill_operator_only(self):
         self.assertEqual((await self.client.get("/archive/messages")).status_code, 401)
