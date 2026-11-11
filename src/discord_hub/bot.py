@@ -453,7 +453,7 @@ class HubBot(discord.Client):
             while seen < max_messages:
                 limit = min(100, max_messages - seen)
                 raw_rows = await self.http.logs_from(
-                    target.id, limit=limit, before=discord.Object(id=before) if before else None
+                    target.id, limit=limit, before=before
                 )
                 for raw in raw_rows:
                     message = discord.Message(state=self._connection, channel=target, data=raw)

@@ -206,6 +206,8 @@ class ArchiveBotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len((await self.store.messages([10], limit=10))["items"]), 2)
         self.assertEqual(len(await self.store.events([10], limit=10)), 2)
         self.assertEqual(self.bot.http.logs_from.await_count, 3)
+        second_call = self.bot.http.logs_from.await_args_list[1]
+        self.assertIs(type(second_call.kwargs["before"]), int)
 
     async def test_cached_edit_captures_before_after_once(self):
         await self.bot.on_message_edit(self.message("A"), self.message("B"))
