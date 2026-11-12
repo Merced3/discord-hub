@@ -129,6 +129,11 @@ next hub task.
   reaction undoes the mark. What a marker means is the project's policy.
   8 offline tests. **Live-verified 2026-10-17** in the 🧪 LAB: 🔄 added
   and removed both delivered with the right marker/message/user.
+- [x] **Generated `#how-to` (ADR 0013)** — Courier-owned introduction and
+  per-project command reference from authenticated redacted declarations;
+  persisted IDs/fingerprints, per-project diff edits, chunk reconciliation,
+  startup recovery, and one-time explicitly enabled legacy purge. `#about`
+  remains approval-only orientation; `#announcements` holds notable changes.
 - [ ] Caretaker proposals — nothing applied without explicit permission.
 - [x] Managed Postgres state (P2d) — registrations and command declarations
   use transactional Postgres with Alembic; harness operational state uses the

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     hub_host: str = "127.0.0.1"
     hub_port: int = 8100
     data_dir: Path = Path("data")
+    # Optional generated command reference. Enabling authorizes a one-time purge
+    # of legacy #how-to messages; subsequent reconciliation touches generated IDs only.
+    how_to_channel_id: int | None = None
     # JSON remains the local default; production selects transactional Postgres.
     discord_hub_database_url: str | None = None
     # Opt-in capture by stable channel/forum ID; threads inherit their parent.

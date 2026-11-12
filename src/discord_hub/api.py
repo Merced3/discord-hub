@@ -502,6 +502,17 @@ def create_api(bot: HubBot, started_at: float) -> FastAPI:
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/commands")
+    async def list_commands(request: Request) -> dict:
+        principal = _principal(request)
+        try:
+            projects = bot.command_store.redacted_view(
+                principal.project_id, operator=principal.operator
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return {"projects": projects}
+
     @app.put("/commands")
     async def set_commands(request: Request, body: SetCommandsRequest) -> dict:
         specs = [

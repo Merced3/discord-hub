@@ -79,7 +79,7 @@ backup/restore evidence and explicit owner approval.
 ## Status
 
 Text routing, threads, webhook identity, project-owned slash commands,
-message edits (send + detect), and full-duplex voice (send + receive with
+Courier-owned generated `#how-to` command reference, message edits (send + detect), and full-duplex voice (send + receive with
 speaking events) are implemented and live-verified. Multi-project
 concurrency (two consumers at once: routing isolation, fair rate-limit
 sharing, fault isolation, crash recovery) is also live-verified — see

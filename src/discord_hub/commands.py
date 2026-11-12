@@ -215,6 +215,26 @@ class CommandStore:
     def all(self) -> dict[str, list[CommandSpec]]:
         return dict(self._by_project)
 
+    def redacted_view(
+        self, project_id: str | None = None, *, operator: bool = False
+    ) -> list[dict[str, Any]]:
+        """Authorized public declarations; callback URLs and credentials stay internal."""
+        if not operator and project_id is None:
+            raise PermissionError("command listing requires a project or operator identity")
+        grouped: dict[str, list[CommandSpec]] = {}
+        for callback_url, specs in self._by_project.items():
+            owner = self._project_ids.get(callback_url)
+            if owner is None or (not operator and owner != project_id):
+                continue
+            grouped.setdefault(owner, []).extend(specs)
+        return [
+            {
+                "project_id": owner,
+                "commands": [asdict(spec) for spec in sorted(specs, key=lambda s: s.name)],
+            }
+            for owner, specs in sorted(grouped.items())
+        ]
+
 
 def build_command(
     spec: CommandSpec,

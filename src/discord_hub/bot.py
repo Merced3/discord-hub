@@ -17,6 +17,7 @@ from .auth import HubAuth
 from .capabilities import tier_limit as _tier_limit
 from .commands import CommandSpec, CommandStore, build_command
 from .config import Settings
+from .how_to import HowToManager, HowToStateStore
 from .registry import ChannelTakenError, Registration, Registry
 from .voice import VoiceManager
 
@@ -230,6 +231,14 @@ class HubBot(discord.Client):
         )
         self.registry = registry
         self.command_store = command_store
+        self.how_to_store = (
+            HowToStateStore(
+                settings.data_dir / "how-to.json",
+                database_url=settings.discord_hub_database_url,
+            )
+            if settings.how_to_channel_id is not None
+            else None
+        )
         self.archive = archive
         self._archive_raw: dict[tuple[Any, ...], dict[str, Any]] = {}
         self._install_archive_raw_parsers()
@@ -244,6 +253,7 @@ class HubBot(discord.Client):
             "unrouted": 0,
         }
         self._commands_lock = asyncio.Lock()
+        self._how_to_reconcile_lock = asyncio.Lock()
         self._registrations_lock = asyncio.Lock()
         self.voice = VoiceManager(settings.discord_guild_id)
 
@@ -338,7 +348,25 @@ class HubBot(discord.Client):
 
     async def on_ready(self) -> None:
         logger.info("Connected to Discord as %s", self.user)
+        await self._reconcile_how_to()
         self.ready_event.set()
+
+    async def _reconcile_how_to(self) -> None:
+        if self.how_to_store is None:
+            return
+        async with self._how_to_reconcile_lock:
+            try:
+                channel_id = self.settings.how_to_channel_id
+                assert channel_id is not None
+                channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+                if not isinstance(channel, discord.TextChannel):
+                    raise LookupError("HOW_TO_CHANNEL_ID is not a text channel")
+                manager = HowToManager(channel, self.how_to_store)
+                await manager.reconcile(self.command_store.redacted_view(operator=True))
+            except Exception:
+                # Help generation is independent of command routing; a later ready or
+                # declaration event retries without rolling back a successful sync.
+                logger.exception("could not reconcile generated #how-to")
 
     # -- archive: lossless capture, independent of consumer callbacks ------
 
@@ -1461,6 +1489,7 @@ class HubBot(discord.Client):
                     specs,
                     project_id,
                 )
+                await self._reconcile_how_to()
             except Exception:
                 self._rebuild_commands()
                 # A network timeout can leave Discord's remote result unknown;
