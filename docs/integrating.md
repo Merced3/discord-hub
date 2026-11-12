@@ -83,6 +83,9 @@ is `null` when the original was sent before the hub last restarted —
 `PUT /commands` with your callback URL and command list (names,
 descriptions, typed options). Replaces your whole set; other projects'
 commands are untouched. Names are unique across all projects (`409`).
+Descriptions and options also drive Courier's generated `#how-to` entry, so
+keep them accurate and concise. `GET /commands` returns only your authenticated
+project's redacted declaration view (the operator can list all projects).
 
 When someone runs your command, the hub POSTs the invocation to your
 callback and **your HTTP response is the Discord response**:

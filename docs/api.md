@@ -419,6 +419,15 @@ Release a channel and delete its webhook. Only the owning project or the
 operator may release it. `204` on success, `404` if the channel was not
 registered, `403` if another project owns it.
 
+### `GET /commands`
+List redacted slash-command declarations for generated help and diagnostics.
+A project receives only its own declarations; the operator receives every
+owned project. The response is `{"projects": [{"project_id", "commands"}]}`,
+with commands in the same shape accepted by `PUT /commands`. Callback URLs,
+webhook URLs, and credentials are never returned. Tokenless legacy callers
+receive `403` in optional mode; normal authentication failures receive `401`.
+Unowned legacy declarations are omitted.
+
 ### `PUT /commands`
 Declare a project's slash commands (ADR 0003). Replaces the project's
 whole set; the hub registers them with Discord and routes invocations to

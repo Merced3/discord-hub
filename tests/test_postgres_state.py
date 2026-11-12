@@ -9,6 +9,7 @@ from dataclasses import asdict
 import psycopg
 
 from discord_hub.commands import CommandNameTakenError, CommandSpec, CommandStore
+from discord_hub.how_to import HowToStateStore
 from discord_hub.registry import ChannelTakenError, Registration, Registry
 from discord_hub.state_migrate import migrate_state
 
@@ -22,7 +23,9 @@ class PostgresStateTests(unittest.TestCase):
     def setUp(self):
         # Isolated application tables in the designated test DB only.
         with psycopg.connect(self.url, autocommit=True) as conn:
-            conn.execute("DROP TABLE IF EXISTS command_specs, channel_registrations CASCADE")
+            conn.execute(
+                "DROP TABLE IF EXISTS command_specs, channel_registrations, how_to_state CASCADE"
+            )
             conn.execute("DROP TABLE IF EXISTS alembic_version")
 
     def registration(self, channel=10, project="a"):
@@ -72,6 +75,19 @@ class PostgresStateTests(unittest.TestCase):
         self.assertIsNone(restarted.owner_of("alpha"))
         self.assertEqual(restarted.owner_of("gamma"), a)
         self.assertEqual(restarted.owner_of("beta"), b)
+
+    def test_how_to_state_survives_restart_and_removes_stale_entries(self):
+        store = HowToStateStore(database_url=self.url)
+        store.put("alpha", "fingerprint-1", ["100", "101"])
+        store.put("__initialized__", "1", [])
+        restarted = HowToStateStore(database_url=self.url)
+        self.assertEqual(
+            restarted.all()["alpha"],
+            {"fingerprint": "fingerprint-1", "message_ids": ["100", "101"]},
+        )
+        restarted.put("alpha", "fingerprint-2", ["100"])
+        restarted.delete("alpha")
+        self.assertEqual(set(restarted.all()), {"__initialized__"})
 
     def test_json_migration_is_idempotent_and_preserves_secrets(self):
         import json
