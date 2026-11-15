@@ -5,3 +5,4 @@ __pycache__/
 data/
 *.pid
 *.log
+docs/self-documentation-thesis/
