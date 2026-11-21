@@ -184,6 +184,23 @@ next hub task.
    buffer of recently-sent original texts per channel so a designated
    owner reaction dumps the original to a flare-up file (a bare emoji
    reaction alone can't identify the sibling chunks of one split message).
+9. **Candidate-then-verified chunk fixtures** — future diagnostic tool,
+   design idea only: before a dev-agent response goes through the chunking
+   pipeline, save the exact pre-chunk text to a *candidate* fixture file.
+   Later unverified responses replace that candidate (so we don't collect
+   every unreviewed response permanently); once the owner applies a
+   designated Discord reaction to the sent message, the candidate is frozen
+   as a verified regression fixture instead of being overwritten. Goal:
+   test chunking against the exact real-world text that was sent. Depends
+   on item 8's capture path; requires its own design and tests.
+10. **Steering an active dev-agent turn** (dev-agent/engine capability,
+    recorded here for visibility — not a discord-hub feature): today a
+    follow-up message in the session thread while the agent is still
+    working gets "Still working on the previous turn" and is neither
+    queued nor delivered. A future design could support interruption or
+    queued steering so the owner can clarify scope, add context, or
+    withdraw a previous approval mid-turn. Needs its own design and tests
+    in the dev-agent project; do not implement it here.
 
 ## Explicitly out of scope (for now)
 
