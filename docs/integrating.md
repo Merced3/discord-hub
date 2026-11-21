@@ -107,6 +107,27 @@ idempotent and keeps the hub in sync after restarts.
 - `PATCH /messages/{id}` — edit a message you sent (body: `channel_id`,
   `text`). Works for both bot-path and webhook-path sends. Single
   message, no chunking: max 2000 characters.
+
+#### How outbound chunking works
+
+Long messages sent via `POST /messages` are split automatically (Discord
+caps one message at 2000 characters; the hub uses 1900 to leave room).
+The splitting is **markdown-aware**: it never breaks a word, it tracks
+inline code spans (so `snake_case_identifiers` inside backticks can't be
+mistaken for emphasis), and when a seam lands inside real emphasis or a
+code fence it closes the markers at the end of one chunk and reopens
+them at the start of the next. Those synthetic close/reopen wrappers are
+not part of your text — concatenating the chunk bodies reproduces your
+message exactly. You don't need to chunk anything yourself.
+
+Production regression coverage (including snake_case identifiers in
+inline code) lives in `tests/test_message_splitting.py`.
+`scripts/discord_message_limit_chunk_playground.py` is a standalone
+playground for interactive investigation of the chunking model. If a
+real message ever splits badly, save the original text to
+`tests/fixtures/flareups/<date>-<slug>.txt` and the playground's
+`--selftest` picks it up automatically.
+
 - `POST /messages/attachments?channel_id=..&filename=..&text=..` — attach
   one file (body = raw bytes, any content type). Cap adapts to the
   server's boost tier (10 MiB base, up to 100 MiB); bigger files get an

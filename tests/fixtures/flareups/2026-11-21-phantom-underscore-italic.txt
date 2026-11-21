@@ -1,0 +1,19 @@
+Good instinct — the "why" (Discord's 2000-char message limit) should be in the name. My take on the candidates:
+
+- scripts/discord_message_limit_chunk_playground.py — my pick. Reads as: playground for chunking because of the Discord message limit. "message limit" is exactly how discord_hub.bot names it (_MESSAGE_LIMIT), so the name greps straight to the production constant.
+- Shorter alternative: discord_message_chunk_playground.py — drops "limit", loses the why.
+
+The docstring will make the boundary explicit either way (standalone model of the markdown-aware splitter that exists because Discord caps messages at ~2000 chars; production code is discord_hub.bot._chunks, tested by tests/test_message_splitting.py), so the name just needs to get someone to open it.
+
+Revised acceptance tests
+
+1. test_playground_rename: scripts/discord_message_limit_chunk_playground.py exists, scripts/split_playground.py does not; python scripts/discord_message_limit_chunk_playground.py --selftest exits 0.
+2. test_playground_boundary_docstring: module docstring explains the script exists because of Discord's message-length limit, states it's a standalone model that does not test production code, and points to discord_hub.bot and tests/test_message_splitting.py.
+3. test_integrating_doc_note: docs/integrating.md documents markdown-aware chunking (inline-code spans, synthetic close/reopen at seams) and references tests/test_message_splitting.py snake_case coverage.
+4. test_no_behavior_regression: python -m pytest and ruff check . clean.
+
+Background filler to push this flare-up past the default chunk limit, because the phantom wrappers only appear at a split seam: the scanner treated every bare underscore as an italic toggle, so ordinary snake_case identifiers scattered through a long message quietly opened emphasis that nothing ever closed. When the splitter later cut the message at the limit, it faithfully emitted a synthetic closer at the end of one chunk and a matching reopener at the start of the next — a lone underscore dangling on the wire.
+
+If you'd rather keep your longer name or the shorter one, say so and I'll swap it in — otherwise I'll go with discord_message_limit_chunk_playground.py on approval.
+
+*(Engine note: identifiers like snake_case_name and foo_bar.py should render literally, not open phantom italics that leak synthetic underscores across split seams.)*

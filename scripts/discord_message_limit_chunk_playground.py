@@ -1,12 +1,33 @@
-"""Playground for a markdown-aware, lossless Discord message splitter.
+"""Playground for the markdown-aware, lossless Discord message splitter.
 
-Run the built-in adversarial suite:
-    python scripts/split_playground.py --selftest
+WHY THIS SCRIPT EXISTS
+    The Discord message limit caps a single message at 2000 characters (the
+    hub uses 1900 to leave room for synthetic wrappers), so every long
+    outbound message must be chunked. Doing that safely means never splitting a word and closing/
+    reopening markdown at the seams. Use THIS playground — not a new one-off
+    script — for interactive or adversarial investigation of that message
+    limit chunking: paste the message that broke, watch where the seams
+    land, tweak the model.
+
+BOUNDARY
+    This is a STANDALONE executable model of the splitter, kept in sync by
+    hand. It does NOT test production code. The implementation the hub
+    actually runs lives in discord_hub.bot (_chunks / _scan_state) and is
+    covered by tests/test_message_splitting.py. If you change the model
+    here, mirror the change in discord_hub.bot and add a production test.
+
+FLARE-UPS
+    When a real message splits badly, save the original text to
+    tests/fixtures/flareups/<date>-<slug>.txt. --selftest discovers every
+    file there, so the regression list grows by dropping in a file.
+
+Run the built-in adversarial suite (includes all flare-up fixtures):
+    python scripts/discord_message_limit_chunk_playground.py --selftest
 
 Split your own text (file or stdin) and inspect every chunk:
-    python scripts/split_playground.py my_message.txt
-    python scripts/split_playground.py my_message.txt --limit 500
-    type my_message.txt | python scripts/split_playground.py -
+    python scripts/discord_message_limit_chunk_playground.py my_message.txt
+    python scripts/discord_message_limit_chunk_playground.py my_message.txt --limit 500
+    type my_message.txt | python scripts/discord_message_limit_chunk_playground.py -
 
 Design rules being tested:
   1. Never split a word. Break preference: paragraph > line > space > hard cut.
@@ -23,6 +44,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 DEFAULT_LIMIT = 1_900
 
@@ -38,7 +60,7 @@ class _MdState:
     inline_stack: list[str] = field(default_factory=list)  # open inline markers
 
 
-def _scan_state(text: str) -> _MdState:
+def _scan_state(text: str, *, _source: str | None = None) -> _MdState:
     """Walk text and return the markdown state at the end of it.
 
     Handles backslash escapes. Fences are line-oriented (``` toggles).
@@ -99,6 +121,11 @@ def _scan_state(text: str) -> _MdState:
             state.inline_stack.append(text[i:run_end])
             i = run_end
             continue
+        if ch == "_" and not _is_emphasis_underscore(
+            text, i, state.inline_stack, _source or text
+        ):
+            i += 1  # literal underscore (identifier-like), not emphasis
+            continue
         # inline markers (check longest first)
         for marker in ("**", "~~", "||", "*", "_"):
             if text.startswith(marker, i):
@@ -111,6 +138,36 @@ def _scan_state(text: str) -> _MdState:
         else:
             i += 1
     return state
+
+
+def _is_emphasis_underscore(
+    text: str, i: int, inline_stack: list[str], source: str
+) -> bool:
+    """Whether the ``_`` at ``text[i]`` acts as an emphasis marker.
+
+    Mirrors discord_hub.bot._is_emphasis_underscore — keep the two in
+    sync. Discord renders underscores inside/around identifier-like
+    tokens (snake_case_name, _MESSAGE_LIMIT) literally; treating every
+    ``_`` as italic leaks phantom synthetic wrappers across split seams.
+    """
+    # ``text`` may be a prefix of ``source`` (the chunker scans prefixes);
+    # look ahead in the full source so identifier detection is stable at
+    # every cut point.
+    prev_c = source[i - 1] if i > 0 else " "
+    next_c = source[i + 1] if i + 1 < len(source) else " "
+    if prev_c.isalnum() and next_c.isalnum():
+        return False  # intra-word: literal
+    if inline_stack and inline_stack[-1] == "_":
+        return True  # closes the open emphasis
+    if next_c.isspace() or not prev_c.isspace():
+        return False  # unmatched closer-shape, or attached to an identifier
+    # opener candidate: literal if its word token is identifier-like
+    j = i + 1
+    while j < len(source) and not source[j].isspace():
+        if source[j] == "_":
+            return False
+        j += 1
+    return True
 
 
 def _wrappers(state: _MdState) -> tuple[str, str]:
@@ -163,8 +220,8 @@ def chunks_with_meta(text: str, limit: int = DEFAULT_LIMIT) -> list[Chunk]:
                 if brk > 0:
                     piece = remaining[:brk]
 
-            state_start = _scan_state(content[:pos])
-            state_end = _scan_state(content[: pos + len(piece)])
+            state_start = _scan_state(content[:pos], _source=content)
+            state_end = _scan_state(content[: pos + len(piece)], _source=content)
 
             # Prefer not to open a fence at the very end of a chunk — but only
             # when breaking before the fence still gives a decent-sized piece.
@@ -173,11 +230,11 @@ def chunks_with_meta(text: str, limit: int = DEFAULT_LIMIT) -> list[Chunk]:
                 cut = piece.rfind("\n```")
                 if cut >= min_len:
                     piece = piece[:cut]
-                    state_end = _scan_state(content[: pos + len(piece)])
+                    state_end = _scan_state(content[: pos + len(piece)], _source=content)
 
             if not piece:  # safety net: never emit an empty message
                 piece = remaining[:1]
-                state_end = _scan_state(content[: pos + len(piece)])
+                state_end = _scan_state(content[: pos + len(piece)], _source=content)
 
             suffix, next_prefix = _wrappers(state_end)
 
@@ -291,8 +348,35 @@ def _selftest() -> int:
     print(f"[{'PASS' if ok else 'FAIL'}] inline code ignores snake_case markers")
     behavioral_failures += 0 if ok else 1
 
-    total = failures + behavioral_failures
-    print(f"{len(cases) + 3 - total}/{len(cases) + 3} total passed")
+    # -- flare-up regressions: real messages that once split badly --
+    # Drop the original text into tests/fixtures/flareups/<date>-<slug>.txt
+    # and it is picked up here automatically. Flare-up files must be plain
+    # prose (no real emphasis spans crossing a seam), so ANY synthetic
+    # emphasis wrapper is a phantom and fails the check.
+    flareup_dir = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "flareups"
+    flareups = sorted(flareup_dir.glob("*.txt"))
+    flareup_failures = 0
+    for fixture in flareups:
+        text = fixture.read_text(encoding="utf-8")
+        meta = chunks_with_meta(text)
+        ok = (
+            verify_lossless(text)
+            and len(meta) > 1  # fixture must actually exercise a seam
+            and not _scan_state(text).inline_stack
+            and not any(
+                m in (c.added_prefix + c.added_suffix)
+                for c in meta
+                for m in ("_", "*")
+            )
+        )
+        flareup_failures += 0 if ok else 1
+        print(f"[{'PASS' if ok else 'FAIL'}] flareup: {fixture.name} -> {len(meta)} chunk(s)")
+    if not flareups:
+        print(f"[WARN] no flareup fixtures found in {flareup_dir}")
+
+    total = failures + behavioral_failures + flareup_failures
+    total_checks = len(cases) + 3 + len(flareups)
+    print(f"{total_checks - total}/{total_checks} total passed")
     return 1 if total else 0
 
 
