@@ -28,6 +28,7 @@ def _load_playground():
         "discord_message_limit_chunk_playground", PLAYGROUND
     )
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve __module__ here
     spec.loader.exec_module(module)
     return module
 

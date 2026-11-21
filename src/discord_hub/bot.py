@@ -40,7 +40,7 @@ class _MdState:
         self.inline_stack: list[str] = []  # open inline markers, in order
 
 
-def _scan_state(text: str) -> _MdState:
+def _scan_state(text: str, *, _source: str | None = None) -> _MdState:
     """Walk text and return the markdown state at the end of it.
 
     Handles backslash escapes. Fences are line-oriented (``` toggles).
@@ -99,6 +99,11 @@ def _scan_state(text: str) -> _MdState:
             state.inline_stack.append(text[i:run_end])
             i = run_end
             continue
+        if ch == "_" and not _is_emphasis_underscore(
+            text, i, state.inline_stack, _source or text
+        ):
+            i += 1  # literal underscore (identifier-like), not emphasis
+            continue
         for marker in ("**", "~~", "||", "*", "_"):
             if text.startswith(marker, i):
                 if state.inline_stack and state.inline_stack[-1] == marker:
@@ -110,6 +115,42 @@ def _scan_state(text: str) -> _MdState:
         else:
             i += 1
     return state
+
+
+def _is_emphasis_underscore(
+    text: str, i: int, inline_stack: list[str], source: str
+) -> bool:
+    """Whether the ``_`` at ``text[i]`` acts as an emphasis marker.
+
+    Discord renders underscores inside or around identifier-like tokens
+    literally (``snake_case_name``, ``_MESSAGE_LIMIT``), while the naive
+    toggle treats every ``_`` as italic and leaks phantom synthetic
+    wrappers across split seams. Rules, conservative by design:
+
+    - intra-word (alphanumeric on both sides): literal;
+    - closes an open ``_`` emphasis: marker;
+    - followed by whitespace/end with nothing to close: literal;
+    - opens only when the word it starts contains no further ``_``
+      (so ``_hello world_`` opens, but ``_MESSAGE_LIMIT`` does not).
+    """
+    # ``text`` may be a prefix of ``source`` (the chunker scans prefixes);
+    # look ahead in the full source so identifier detection is stable at
+    # every cut point.
+    prev_c = source[i - 1] if i > 0 else " "
+    next_c = source[i + 1] if i + 1 < len(source) else " "
+    if prev_c.isalnum() and next_c.isalnum():
+        return False  # intra-word: literal
+    if inline_stack and inline_stack[-1] == "_":
+        return True  # closes the open emphasis
+    if next_c.isspace() or not prev_c.isspace():
+        return False  # unmatched closer-shape, or attached to an identifier
+    # opener candidate: literal if its word token is identifier-like
+    j = i + 1
+    while j < len(source) and not source[j].isspace():
+        if source[j] == "_":
+            return False
+        j += 1
+    return True
 
 
 def _wrappers(state: _MdState) -> tuple[str, str]:
@@ -172,8 +213,8 @@ def _chunks_with_meta(text: str, limit: int = _MESSAGE_LIMIT) -> list[tuple[str,
                 if brk > 0:
                     piece = remaining[:brk]
 
-            state_start = _scan_state(content[:pos])
-            state_end = _scan_state(content[: pos + len(piece)])
+            state_start = _scan_state(content[:pos], _source=content)
+            state_end = _scan_state(content[: pos + len(piece)], _source=content)
 
             # Prefer not to open a fence at the very end of a chunk — but only
             # when breaking before the fence still gives a decent-sized piece.
@@ -182,11 +223,11 @@ def _chunks_with_meta(text: str, limit: int = _MESSAGE_LIMIT) -> list[tuple[str,
                 cut = piece.rfind("\n```")
                 if cut >= min_len:
                     piece = piece[:cut]
-                    state_end = _scan_state(content[: pos + len(piece)])
+                    state_end = _scan_state(content[: pos + len(piece)], _source=content)
 
             if not piece:  # safety net: never emit an empty message
                 piece = remaining[:1]
-                state_end = _scan_state(content[: pos + len(piece)])
+                state_end = _scan_state(content[: pos + len(piece)], _source=content)
 
             suffix, next_prefix = _wrappers(state_end)
 

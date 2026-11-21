@@ -177,6 +177,13 @@ next hub task.
 7. ~~**Inline-code-aware markdown scanning**~~ ✅ done 2026-10-28 — markers
    inside inline code no longer corrupt chunk wrappers, including the captured
    snake_case phantom-suffix case and forced split seams. Regression-tested.
+8. **Flare-up capture for chunk splitting** — when a real message splits
+   badly, the manual path works today: save the original text to
+   `tests/fixtures/flareups/` and the playground `--selftest` picks it up.
+   A nicer alert path would be a small hub feature: keep a short ring
+   buffer of recently-sent original texts per channel so a designated
+   owner reaction dumps the original to a flare-up file (a bare emoji
+   reaction alone can't identify the sibling chunks of one split message).
 
 ## Explicitly out of scope (for now)
 
