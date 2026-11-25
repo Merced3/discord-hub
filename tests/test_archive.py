@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 
 from discord_hub.api import create_api
-from discord_hub.archive import ArchiveEvent, MemoryArchiveStore
+from discord_hub.archive import ArchiveEvent, MemoryArchiveStore, PostgresArchiveStore
 from discord_hub.bot import HubBot
 from discord_hub.commands import CommandStore
 from discord_hub.config import Settings
@@ -97,6 +97,73 @@ class ArchiveStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["items"][0]["id"], "49")
         self.assertIsNone(second["next_before"])
         self.assertEqual(len(await self.store.events([10], limit=100)), 1)
+
+    async def test_events_filter_by_scope_channel_id(self):
+        await self.store.record(
+            event("reaction_added", channel_id=99, scope_channel_id=10, emoji="⭐", actor_id=7)
+        )
+        rows = await self.store.events([10], limit=100)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["channel_id"], "99")
+        self.assertEqual(await self.store.events([99], limit=100), [])
+
+    async def test_postgres_record_inserts_non_null_scope_channel_id(self):
+        store = PostgresArchiveStore("postgresql://unused")
+        executed: list[tuple[str, tuple]] = []
+
+        class _FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, sql, params):
+                executed.append((sql, params))
+
+            def fetchone(self):
+                return {"id": 1}
+
+        class _FakeConn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return _FakeCursor()
+
+        with unittest.mock.patch.object(store, "_connect", return_value=_FakeConn()):
+            await store.record(
+                ArchiveEvent(
+                    event_type="reaction_added",
+                    channel_id=99,
+                    scope_channel_id=10,
+                    message_id=50,
+                    actor_id=7,
+                    emoji="🔒",
+                    occurred_at=NOW,
+                )
+            )
+            await store.record(
+                ArchiveEvent(
+                    event_type="reaction_removed",
+                    channel_id=10,
+                    message_id=50,
+                    actor_id=7,
+                    emoji="🔒",
+                    occurred_at=NOW,
+                )
+            )
+
+        insert_calls = [call for call in executed if "INSERT INTO archive_events" in call[0]]
+        self.assertEqual(len(insert_calls), 2)
+        self.assertIn("scope_channel_id", insert_calls[0][0])
+        self.assertEqual(insert_calls[0][1][1], 99)
+        self.assertEqual(insert_calls[0][1][2], 10)
+        self.assertEqual(insert_calls[1][1][1], 10)
+        self.assertEqual(insert_calls[1][1][2], 10)
 
 
 class ArchiveBotTests(unittest.IsolatedAsyncioTestCase):

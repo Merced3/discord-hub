@@ -458,7 +458,8 @@ class HubBot(discord.Client):
         raw: dict | None = None,
         dedupe_key: str | None = None,
     ) -> None:
-        if await self._archive_root_channel(message.channel.id) is None:
+        scope_channel_id = await self._archive_root_channel(message.channel.id)
+        if scope_channel_id is None:
             return
         raw = raw if raw is not None else self._archive_raw.pop(("message", str(message.id)), {})
         try:
@@ -482,6 +483,7 @@ class HubBot(discord.Client):
                 ArchiveEvent(
                     event_type=kind,
                     channel_id=message.channel.id,
+                    scope_channel_id=scope_channel_id,
                     message_id=message.id,
                     actor_id=message.author.id,
                     payload=payload or {"text": message.content},
@@ -497,7 +499,8 @@ class HubBot(discord.Client):
     async def _capture_thread(
         self, thread: discord.Thread, kind: str, before: discord.Thread | None = None
     ) -> None:
-        if await self._archive_root_channel(thread.id) is None:
+        scope_channel_id = await self._archive_root_channel(thread.id)
+        if scope_channel_id is None:
             return
         raw = self._archive_raw.pop((f"thread-{kind.removeprefix('thread_')}", str(thread.id)), {})
         payload: dict[str, Any] = {
@@ -515,6 +518,7 @@ class HubBot(discord.Client):
             ArchiveEvent(
                 event_type=kind,
                 channel_id=thread.id,
+                scope_channel_id=scope_channel_id,
                 occurred_at=datetime.now(UTC),
                 payload=payload,
                 raw=raw,
@@ -559,6 +563,7 @@ class HubBot(discord.Client):
                             ArchiveEvent(
                                 event_type="message_edited",
                                 channel_id=target.id,
+                                scope_channel_id=channel_id,
                                 message_id=message.id,
                                 actor_id=message.author.id,
                                 payload={"before_text": None, "after_text": message.content},
@@ -567,7 +572,7 @@ class HubBot(discord.Client):
                                 dedupe_key=f"backfill:edit:{message.id}:{raw.get('edited_timestamp')}",
                             )
                         )
-                    await self._backfill_reactions(message, raw)
+                    await self._backfill_reactions(message, raw, scope_channel_id=channel_id)
                 seen += len(raw_rows)
                 if raw_rows:
                     before = int(raw_rows[-1]["id"])
@@ -584,7 +589,18 @@ class HubBot(discord.Client):
             "next_before": str(before) if before else None,
         }
 
-    async def _backfill_reactions(self, message: discord.Message, raw: dict[str, Any]) -> None:
+    async def _backfill_reactions(
+        self,
+        message: discord.Message,
+        raw: dict[str, Any],
+        *,
+        scope_channel_id: int | None = None,
+    ) -> None:
+        resolved_scope = (
+            scope_channel_id
+            if scope_channel_id is not None
+            else getattr(message.channel, "parent_id", None) or message.channel.id
+        )
         for reaction in message.reactions:
             if str(reaction.emoji).replace("\ufe0f", "") not in {"🔄", "🔒", "⭐"}:
                 continue
@@ -593,6 +609,7 @@ class HubBot(discord.Client):
                     ArchiveEvent(
                         event_type="reaction_added",
                         channel_id=message.channel.id,
+                        scope_channel_id=resolved_scope,
                         message_id=message.id,
                         actor_id=user.id,
                         emoji=str(reaction.emoji),
@@ -662,6 +679,7 @@ class HubBot(discord.Client):
             ArchiveEvent(
                 event_type="message_deleted",
                 channel_id=event.channel_id,
+                scope_channel_id=channel_id,
                 message_id=event.message_id,
                 occurred_at=datetime.now(UTC),
                 raw=raw,
@@ -807,6 +825,7 @@ class HubBot(discord.Client):
                     ArchiveEvent(
                         event_type=f"reaction_{action}",
                         channel_id=event.channel_id,
+                        scope_channel_id=channel_id,
                         message_id=event.message_id,
                         actor_id=event.user_id,
                         emoji=str(event.emoji),

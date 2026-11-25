@@ -28,6 +28,7 @@ class ArchiveEvent:
     payload: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
     dedupe_key: str | None = None
+    scope_channel_id: int | None = None
 
 
 def _json(value: Any) -> Any:
@@ -80,11 +81,15 @@ class MemoryArchiveStore:
             self._dedupe.add(event.dedupe_key)
         event_id = self._next_event
         self._next_event += 1
+        scope_channel_id = (
+            event.scope_channel_id if event.scope_channel_id is not None else event.channel_id
+        )
         self._events.append(
             {
                 "id": event_id,
                 "event_type": event.event_type,
                 "channel_id": str(event.channel_id),
+                "scope_channel_id": str(scope_channel_id),
                 "message_id": str(event.message_id) if event.message_id else None,
                 "actor_id": str(event.actor_id) if event.actor_id else None,
                 "emoji": event.emoji,
@@ -136,11 +141,14 @@ class MemoryArchiveStore:
         rows = [
             e
             for e in self._events
-            if e["channel_id"] in wanted
+            if e["scope_channel_id"] in wanted
             and (include_private or not e["message_id"] or int(e["message_id"]) not in private_ids)
             and (before is None or e["id"] < before)
         ]
-        return [{k: _json(v) for k, v in e.items() if k != "raw"} for e in rows[-limit:]]
+        return [
+            {k: _json(v) for k, v in e.items() if k not in {"raw", "scope_channel_id"}}
+            for e in rows[-limit:]
+        ]
 
     async def attachment(self, attachment_id: int) -> dict[str, Any] | None:
         for message in self._messages.values():
@@ -201,17 +209,23 @@ class PostgresArchiveStore:
         await asyncio.to_thread(write)
 
     async def record(self, event: ArchiveEvent) -> int | None:
+        scope_channel_id = (
+            event.scope_channel_id if event.scope_channel_id is not None else event.channel_id
+        )
+
         def write() -> int | None:
             with self._connect() as conn, conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO archive_events
-                    (event_type, channel_id, message_id, actor_id, emoji, payload, raw,
-                     occurred_at, dedupe_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (event_type, channel_id, scope_channel_id, message_id, actor_id, emoji,
+                     payload, raw, occurred_at, dedupe_key)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
                     RETURNING id""",
                     (
                         event.event_type,
                         event.channel_id,
+                        scope_channel_id,
                         event.message_id,
                         event.actor_id,
                         event.emoji,
@@ -290,7 +304,7 @@ class PostgresArchiveStore:
                     """SELECT e.id, e.event_type, e.channel_id, e.message_id, e.actor_id,
                      e.emoji, e.payload, e.occurred_at FROM archive_events e
                      LEFT JOIN archive_messages m ON m.message_id=e.message_id
-                     WHERE e.channel_id = ANY(%s)
+                     WHERE e.scope_channel_id = ANY(%s)
                      AND (%s OR e.message_id IS NULL OR m.message_id IS NULL OR NOT m.private)
                      AND (%s::bigint IS NULL OR e.id < %s)
                      ORDER BY e.id DESC LIMIT %s""",
